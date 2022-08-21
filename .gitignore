@@ -1,0 +1,8 @@
+.vs/*
+x64/*
+RIN/x64/*
+Test/x64/*
+res/*
+!res/environments
+res/environments/*
+!res/environments/brdf.dds

@@ -1,0 +1,192 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{aff7ae79-cacb-44fa-aea1-540e3e4e562a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Renderer">
+      <UniqueIdentifier>{3b2ac32a-b972-465a-ba9d-8544fb745efa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="_Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Renderer\_Header Files">
+      <UniqueIdentifier>{57e78f56-d76b-47c6-a496-5c4131a2d2c6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Renderer\_Source Files">
+      <UniqueIdentifier>{9c9d5597-2073-4061-a0ff-46072ee81fa1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Util">
+      <UniqueIdentifier>{18c59d31-bffc-443f-8151-c9948031864c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Util\_Header Files">
+      <UniqueIdentifier>{64c75924-7f42-43e2-9f14-5517c8f20088}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Util\_Source Files">
+      <UniqueIdentifier>{32ba3d5f-561d-405c-9164-cc6c9e46981b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\D3D12">
+      <UniqueIdentifier>{937cfc60-f13c-48a4-9401-bf21e39e5d1a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Renderer\D3D12">
+      <UniqueIdentifier>{c3e9e675-360c-41ce-8ca4-c9e3b4a39f5a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Renderer\D3D12\_Header Files">
+      <UniqueIdentifier>{bcab9fb6-9d3c-46a5-b6e4-9449cdd2d34f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Renderer\D3D12\_Source Files">
+      <UniqueIdentifier>{5eaf9385-64e3-47f6-b446-1c10178e40cd}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Debug.hpp">
+      <Filter>_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Error.hpp">
+      <Filter>_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Settings.hpp">
+      <Filter>_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Renderer.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Geometry.hpp">
+      <Filter>_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Pool.hpp">
+      <Filter>Util\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FreeListAllocator.hpp">
+      <Filter>Util\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PoolAllocator.hpp">
+      <Filter>Util\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Config.hpp">
+      <Filter>_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="BumpAllocator.hpp">
+      <Filter>Util\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ThreadPool.hpp">
+      <Filter>Util\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12Renderer.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Camera.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12Camera.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StaticObject.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StaticMesh.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12StaticMesh.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="BoundingSphere.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Texture.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12Texture.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Material.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DynamicObject.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DynamicMesh.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12DynamicMesh.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VertexData.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12ShaderData.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Renderer.cpp">
+      <Filter>Renderer\_Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FreeListAllocator.cpp">
+      <Filter>Util\_Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PoolAllocator.cpp">
+      <Filter>Util\_Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="BumpAllocator.cpp">
+      <Filter>Util\_Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D3D12Renderer.cpp">
+      <Filter>Renderer\D3D12\_Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="CullStaticCS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRStaticVS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="PostPS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="PostVS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="CullDynamicCS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRDynamicVS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="DepthMIPCS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRPS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="SkyboxVS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+    <FxCompile Include="SkyboxPS.hlsl">
+      <Filter>Shaders\D3D12</Filter>
+    </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="SceneObject.hlsli">
+      <Filter>Shaders\D3D12</Filter>
+    </None>
+    <None Include="Camera.hlsli">
+      <Filter>Shaders\D3D12</Filter>
+    </None>
+    <None Include="PBRInputs.hlsli">
+      <Filter>Shaders\D3D12</Filter>
+    </None>
+    <None Include="Color.hlsli">
+      <Filter>Shaders\D3D12</Filter>
+    </None>
+    <None Include="Util.hlsli">
+      <Filter>Shaders\D3D12</Filter>
+    </None>
+  </ItemGroup>
+</Project>
