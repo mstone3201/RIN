@@ -20,10 +20,6 @@
 #include "D3D12DynamicMesh.hpp"
 #include "D3D12Texture.hpp"
 
-/*
-TODO: Test zero config
-*/
-
 namespace RIN {
 	class D3D12Renderer : public Renderer {
 		friend Renderer* Renderer::create(HWND, const Config&, const Settings&);
@@ -104,6 +100,7 @@ namespace RIN {
 		char* uploadBufferData{};
 		uint64_t uploadCameraOffset;
 		uint64_t uploadDynamicObjectOffset;
+		uint64_t uploadLightOffset;
 		uint64_t uploadStreamOffset;
 		// Upload stream
 		ID3D12CommandAllocator* uploadUpdateCommandAllocator{};
@@ -118,7 +115,7 @@ namespace RIN {
 
 		// Scene
 		ID3D12DescriptorHeap* sceneDescHeap{};
-		// Depth MIP Mapping
+		// Depth MIP mapping
 		ID3D12RootSignature* depthMIPRootSignature{};
 		ID3D12PipelineState* depthMIPPipelineState{};
 		ID3D12CommandAllocator* depthMIPCommandAllocator{};
@@ -132,6 +129,11 @@ namespace RIN {
 		ID3D12GraphicsCommandList* cullStaticCommandList{};
 		ID3D12CommandAllocator* cullDynamicCommandAllocator{};
 		ID3D12GraphicsCommandList* cullDynamicCommandList{};
+		// Light clustering
+		ID3D12RootSignature* lightClusterRootSignature{};
+		ID3D12PipelineState* lightClusterPipelineState{};
+		ID3D12CommandAllocator* lightClusterCommandAllocator{};
+		ID3D12GraphicsCommandList* lightClusterCommandList{};
 		// Scene rendering
 		ID3D12DescriptorHeap* sceneRTVDescHeap{};
 		ID3D12DescriptorHeap* sceneDSVDescHeap{};
@@ -177,6 +179,8 @@ namespace RIN {
 		ID3D12Resource* sceneDynamicIndexBuffer{};
 		ID3D12Resource* sceneStaticObjectBuffer{};
 		ID3D12Resource* sceneDynamicObjectBuffer{};
+		ID3D12Resource* sceneLightBuffer{};
+		ID3D12Resource* sceneLightClusterBuffer{};
 		D3D12_VERTEX_BUFFER_VIEW postScreenQuadVBV{};
 		D3D12_VERTEX_BUFFER_VIEW skyboxVBV{};
 		D3D12_VERTEX_BUFFER_VIEW sceneStaticVBV{};
@@ -198,6 +202,7 @@ namespace RIN {
 		DynamicPool<DynamicObject> sceneDynamicObjectPool;
 		DynamicPool<D3D12Texture> sceneTexturePool;
 		DynamicPool<Material> sceneMaterialPool;
+		DynamicPool<Light> sceneLightPool;
 		D3D12Texture* skyboxTexture{};
 		D3D12Texture* diffuseIBLTexture{};
 		D3D12Texture* specularIBLTexture{};
@@ -228,6 +233,7 @@ namespace RIN {
 		void recordDepthMIPCommandList();
 		void recordCullStaticCommandList();
 		void recordCullDynamicCommandList();
+		void recordLightClusterCommandList();
 		void recordSceneStaticCommandList();
 		void recordSceneDynamicCommandList();
 		void recordSkyboxCommandList();
@@ -236,6 +242,7 @@ namespace RIN {
 		// Upload stream
 		void uploadStreamWork(uint32_t copyQueueIndex);
 		void uploadDynamicObjectHelper(uint32_t startIndex, uint32_t endIndex);
+		void uploadLightHelper(uint32_t startIndex, uint32_t endIndex);
 		void destroyDeadTextures();
 
 		// Misc
@@ -292,6 +299,8 @@ namespace RIN {
 			Texture* special
 		) override;
 		void removeMaterial(Material* material) override;
+		Light* addLight() override;
+		void removeLight(Light* light) override;
 		void setSkybox(Texture* skybox, Texture* diffuseIBL, Texture* specularIBL) override;
 		void setBRDFLUT(Texture* texture) override;
 		// GUI

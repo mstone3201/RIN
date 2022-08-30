@@ -14,6 +14,7 @@
 #include "DynamicObject.hpp"
 #include "Texture.hpp"
 #include "Material.hpp"
+#include "Light.hpp"
 
 /*
 Using DirectXMath
@@ -75,6 +76,8 @@ namespace RIN {
 	Renderer::removeTexture is thread-safe
 	Renderer::addMaterial is thread-safe
 	Renderer::removeMaterial is thread-safe
+	Renderer::addLight is thread-safe
+	Renderer::removeLight is thread-safe
 	Renderer::setSkybox is not thread-safe
 	Renderer::setBRDFLUT is not thread-safe
 	Renderer::update is not thread-safe
@@ -147,10 +150,12 @@ namespace RIN {
 			Texture* special = nullptr
 		) = 0;
 		virtual void removeMaterial(Material* material) = 0;
+		virtual Light* addLight() = 0;
+		virtual void removeLight(Light*) = 0;
 		virtual void setSkybox(Texture* skybox, Texture* diffuseIBL, Texture* specularIBL) = 0;
 		virtual void setBRDFLUT(Texture* texture) = 0;
 		// GUI
-		// Update and upload commit
+		// Update and commit upload
 		virtual void update() = 0;
 
 		// Rendering

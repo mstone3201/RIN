@@ -10,6 +10,7 @@
 #include "shaders/DepthMIPCS.h"
 #include "shaders/CullStaticCS.h"
 #include "shaders/CullDynamicCS.h"
+#include "shaders/LightClusterCS.h"
 #include "shaders/PBRStaticVS.h"
 #include "shaders/PBRDynamicVS.h"
 #include "shaders/PBRPS.h"
@@ -28,8 +29,8 @@ constexpr DXGI_FORMAT DEPTH_FORMAT_DSV = DXGI_FORMAT_D32_FLOAT;
 constexpr DXGI_FORMAT DEPTH_FORMAT_SRV = DXGI_FORMAT_R32_FLOAT;
 constexpr DXGI_FORMAT INDEX_FORMAT = DXGI_FORMAT_R32_UINT;
 
-// (Sync) For copying camera matrices and static and dynamic object data
-constexpr uint32_t COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_INDEX = 0;
+// (Sync) For copying camera data, static and dynamic object data, and light data
+constexpr uint32_t COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX = 0;
 // (Async) For copying static vertices and dynamic indices
 constexpr uint32_t COPY_QUEUE_STATIC_VB_DYNAMIC_IB_INDEX = 1;
 // (Async) For copying dynamic vertices and static indices
@@ -49,6 +50,16 @@ constexpr uint32_t DEPTH_MIP_THREAD_GROUP_SIZE_X = 32;
 constexpr uint32_t DEPTH_MIP_THREAD_GROUP_SIZE_Y = 32;
 constexpr uint32_t SCENE_DEPTH_HIERARCHY_MIP_COUNT = 16;
 
+constexpr uint32_t LIGHT_CLUSTER_THREAD_GROUP_SIZE_X = 16;
+constexpr uint32_t LIGHT_CLUSTER_THREAD_GROUP_SIZE_Y = 8;
+constexpr uint32_t LIGHT_CLUSTER_THREAD_GROUP_SIZE_Z = 8;
+constexpr uint32_t SCENE_LIGHT_CLUSTER_LIGHT_COUNT = 63;
+constexpr uint32_t SCENE_LIGHT_CLUSTER_SIZE = sizeof(uint32_t) + SCENE_LIGHT_CLUSTER_LIGHT_COUNT * sizeof(uint32_t);
+
+static_assert(SCENE_FRUSTUM_CLUSTER_WIDTH % LIGHT_CLUSTER_THREAD_GROUP_SIZE_X == 0, "Invalid light cluster thread group x");
+static_assert(SCENE_FRUSTUM_CLUSTER_HEIGHT % LIGHT_CLUSTER_THREAD_GROUP_SIZE_Y == 0, "Invalid light cluster thread group y");
+static_assert(SCENE_FRUSTUM_CLUSTER_DEPTH % LIGHT_CLUSTER_THREAD_GROUP_SIZE_Z == 0, "Invalud light cluster thread group z");
+
 /*
 0: (SRV) sceneBackBuffer
 1: (SRV) sceneDepthBuffer
@@ -57,7 +68,8 @@ constexpr uint32_t SCENE_DEPTH_HIERARCHY_MIP_COUNT = 16;
 19-34: (UAV) sceneDepthHierarchy MIP
 35: (UAV) sceneStaticCommandBuffer
 36: (UAV) sceneDynamicCommandBuffer
-37-unbounded: (SRV) sceneTexture
+37: (UAV) sceneLightClusterBuffer
+38-unbounded: (SRV) sceneTexture
 */
 constexpr uint32_t SCENE_BACK_BUFFER_SRV_OFFSET = 0;
 constexpr uint32_t SCENE_DEPTH_BUFFER_SRV_OFFSET = 1;
@@ -66,8 +78,9 @@ constexpr uint32_t SCENE_DEPTH_HIERARCHY_MIP_SRV_OFFSET = 3;
 constexpr uint32_t SCENE_DEPTH_HIERARCHY_MIP_UAV_OFFSET = 19;
 constexpr uint32_t SCENE_STATIC_COMMAND_BUFFER_UAV_OFFSET = 35;
 constexpr uint32_t SCENE_DYNAMIC_COMMAND_BUFFER_UAV_OFFSET = 36;
-constexpr uint32_t SCENE_DESC_CONST_COUNT = 37;
-constexpr uint32_t SCENE_TEXTURE_SRV_OFFSET = 37;
+constexpr uint32_t SCENE_LIGHT_CLUSTER_BUFFER_UAV_OFFSET = 37;
+constexpr uint32_t SCENE_DESC_CONST_COUNT = 38;
+constexpr uint32_t SCENE_TEXTURE_SRV_OFFSET = 38;
 
 #ifdef RIN_DEBUG
 constexpr uint32_t DEBUG_QUERY_PIPELINE_STATIC_RENDER = 0;
@@ -91,7 +104,8 @@ namespace RIN {
 		sceneDynamicMeshPool(config.dynamicMeshCount),
 		sceneDynamicObjectPool(config.dynamicObjectCount),
 		sceneTexturePool(config.textureCount),
-		sceneMaterialPool(config.materialCount)
+		sceneMaterialPool(config.materialCount),
+		sceneLightPool(config.lightCount)
 	{
 		// Make sure that every call which can fail calls destroy()
 		// before throwing an error
@@ -358,8 +372,11 @@ namespace RIN {
 		
 		uploadDynamicObjectOffset = uploadCameraOffset + uploadCameraSize;
 		const uint64_t uploadDynamicObjectSize = config.dynamicObjectCount * sizeof(D3D12DynamicObjectData);
+
+		uploadLightOffset = uploadDynamicObjectOffset + uploadDynamicObjectSize;
+		const uint64_t uploadLightSize = config.lightCount * sizeof(D3D12LightData);
 		
-		uploadStreamOffset = uploadDynamicObjectOffset + uploadDynamicObjectSize;
+		uploadStreamOffset = uploadLightOffset + uploadLightSize;
 
 		// Create a committed upload resource
 		D3D12_HEAP_PROPERTIES heapProperties{};
@@ -537,14 +554,14 @@ namespace RIN {
 		RIN_DEBUG_NAME(depthMIPRootSignature, "Depth MIP Root Signature");
 
 		// Create depth MIP mapping pipeline state
-		D3D12_COMPUTE_PIPELINE_STATE_DESC depthMIPPipelineStateDesc{};
-		depthMIPPipelineStateDesc.pRootSignature = depthMIPRootSignature;
-		depthMIPPipelineStateDesc.CS.pShaderBytecode = RINShaderBytesDepthMIPCS;
-		depthMIPPipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesDepthMIPCS);
-		depthMIPPipelineStateDesc.NodeMask = 0;
-		depthMIPPipelineStateDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+		D3D12_COMPUTE_PIPELINE_STATE_DESC computePipelineStateDesc{};
+		computePipelineStateDesc.pRootSignature = depthMIPRootSignature;
+		computePipelineStateDesc.CS.pShaderBytecode = RINShaderBytesDepthMIPCS;
+		computePipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesDepthMIPCS);
+		computePipelineStateDesc.NodeMask = 0;
+		computePipelineStateDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
 
-		result = device->CreateComputePipelineState(&depthMIPPipelineStateDesc, IID_PPV_ARGS(&depthMIPPipelineState));
+		result = device->CreateComputePipelineState(&computePipelineStateDesc, IID_PPV_ARGS(&depthMIPPipelineState));
 		if(FAILED(result)) RIN_ERROR("Failed to create depth MIP mapping pipeline state");
 		RIN_DEBUG_NAME(depthMIPPipelineState, "Depth MIP Pipeline State");
 
@@ -567,14 +584,11 @@ namespace RIN {
 		RIN_DEBUG_NAME(cullStaticRootSignature, "Cull Static Root Signature");
 
 		// Create static culling pipeline state
-		D3D12_COMPUTE_PIPELINE_STATE_DESC cullPipelineStateDesc{};
-		cullPipelineStateDesc.pRootSignature = cullStaticRootSignature;
-		cullPipelineStateDesc.CS.pShaderBytecode = RINShaderBytesCullStaticCS;
-		cullPipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesCullStaticCS);
-		cullPipelineStateDesc.NodeMask = 0;
-		cullPipelineStateDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+		computePipelineStateDesc.pRootSignature = cullStaticRootSignature;
+		computePipelineStateDesc.CS.pShaderBytecode = RINShaderBytesCullStaticCS;
+		computePipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesCullStaticCS);
 
-		result = device->CreateComputePipelineState(&cullPipelineStateDesc, IID_PPV_ARGS(&cullStaticPipelineState));
+		result = device->CreateComputePipelineState(&computePipelineStateDesc, IID_PPV_ARGS(&cullStaticPipelineState));
 		if(FAILED(result)) RIN_ERROR("Failed to create static culling pipeline state");
 		RIN_DEBUG_NAME(cullStaticPipelineState, "Cull Static Pipeline State");
 
@@ -585,11 +599,11 @@ namespace RIN {
 		RIN_DEBUG_NAME(cullDynamicRootSignature, "Cull Dynamic Root Signature");
 
 		// Create dynamic culling pipeline state
-		cullPipelineStateDesc.pRootSignature = cullDynamicRootSignature;
-		cullPipelineStateDesc.CS.pShaderBytecode = RINShaderBytesCullDynamicCS;
-		cullPipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesCullDynamicCS);
+		computePipelineStateDesc.pRootSignature = cullDynamicRootSignature;
+		computePipelineStateDesc.CS.pShaderBytecode = RINShaderBytesCullDynamicCS;
+		computePipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesCullDynamicCS);
 
-		result = device->CreateComputePipelineState(&cullPipelineStateDesc, IID_PPV_ARGS(&cullDynamicPipelineState));
+		result = device->CreateComputePipelineState(&computePipelineStateDesc, IID_PPV_ARGS(&cullDynamicPipelineState));
 		if(FAILED(result)) RIN_ERROR("Failed to create dynamic culling pipeline state");
 		RIN_DEBUG_NAME(cullDynamicPipelineState, "Cull Dynamic Pipeline State");
 
@@ -612,6 +626,33 @@ namespace RIN {
 		result = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&cullDynamicCommandList));
 		if(FAILED(result)) RIN_ERROR("Failed to create dynamic culling command list");
 		RIN_DEBUG_NAME(cullDynamicCommandList, "Cull Dynamic Command List");
+
+		// Light clustering
+		
+		// Create light clustering root signature
+		// Located in LightClusterCS.hlsl
+		result = device->CreateRootSignature(0, RINShaderBytesLightClusterCS, sizeof(RINShaderBytesLightClusterCS), IID_PPV_ARGS(&lightClusterRootSignature));
+		if(FAILED(result)) RIN_ERROR("Failed to create light clustering root signature");
+		RIN_DEBUG_NAME(lightClusterRootSignature, "Light Cluster Root Signature");
+
+		// Create light clustering pipeline state
+		computePipelineStateDesc.pRootSignature = lightClusterRootSignature;
+		computePipelineStateDesc.CS.pShaderBytecode = RINShaderBytesLightClusterCS;
+		computePipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesLightClusterCS);
+
+		result = device->CreateComputePipelineState(&computePipelineStateDesc, IID_PPV_ARGS(&lightClusterPipelineState));
+		if(FAILED(result)) RIN_ERROR("Failed to create light clustering pipeline state");
+		RIN_DEBUG_NAME(lightClusterPipelineState, "Light Cluster Pipeline State");
+
+		// Create light clustering command allocator
+		result = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&lightClusterCommandAllocator));
+		if(FAILED(result)) RIN_ERROR("Failed to create light clustering command allocator");
+		RIN_DEBUG_NAME(lightClusterCommandAllocator, "Light Cluster Command Allocator");
+
+		// Create closed light clustering command list
+		result = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&lightClusterCommandList));
+		if(FAILED(result)) RIN_ERROR("Failed to create light clustering command list");
+		RIN_DEBUG_NAME(lightClusterCommandList, "Light Cluster Command List");
 
 		// Scene rendering
 		
@@ -1074,9 +1115,18 @@ namespace RIN {
 		const uint64_t dynamicObjectBufferOffset = staticObjectBufferOffset + staticObjectBufferSize;
 		const uint64_t dynamicObjectBufferSize = ALIGN_TO(config.dynamicObjectCount * sizeof(D3D12DynamicObjectData), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
+		const uint64_t lightBufferOffset = dynamicObjectBufferOffset + dynamicObjectBufferSize;
+		const uint64_t lightBufferSize = ALIGN_TO(config.lightCount * sizeof(D3D12LightData), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+
+		const uint64_t lightClusterBufferOffset = lightBufferOffset + lightBufferSize;
+		const uint64_t lightClusterBufferSize = ALIGN_TO(
+			SCENE_FRUSTUM_CLUSTER_WIDTH * SCENE_FRUSTUM_CLUSTER_HEIGHT * SCENE_FRUSTUM_CLUSTER_DEPTH * SCENE_LIGHT_CLUSTER_SIZE,
+			D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT
+		);
+
 		// Create scene buffer heap
 		D3D12_HEAP_DESC heapDesc{};
-		heapDesc.SizeInBytes = dynamicObjectBufferOffset + dynamicObjectBufferSize;
+		heapDesc.SizeInBytes = lightClusterBufferOffset + lightClusterBufferSize;
 		heapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
 		heapDesc.Properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
 		heapDesc.Properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
@@ -1242,6 +1292,35 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Faield to create scene dynamic object buffer");
 		RIN_DEBUG_NAME(sceneDynamicObjectBuffer, "Scene Dynamic Object Buffer");
 
+		// Create scene light buffer
+		resourceDesc.Width = lightBufferSize;
+
+		result = device->CreatePlacedResource(
+			sceneBufferHeap,
+			lightBufferOffset,
+			&resourceDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneLightBuffer)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene light buffer");
+		RIN_DEBUG_NAME(sceneLightBuffer, "Scene Light Buffer");
+
+		// Create scene light cluster buffer
+		resourceDesc.Width = lightClusterBufferSize;
+		resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+		result = device->CreatePlacedResource(
+			sceneBufferHeap,
+			lightClusterBufferOffset,
+			&resourceDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneLightClusterBuffer)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene light cluster buffer");
+		RIN_DEBUG_NAME(sceneLightClusterBuffer, "Scene Light Cluster Buffer");
+
 		// Create resource views
 
 		/*
@@ -1274,6 +1353,18 @@ namespace RIN {
 			sceneDynamicCommandBuffer,
 			&uavDesc,
 			getSceneDescHeapCPUHandle(SCENE_DYNAMIC_COMMAND_BUFFER_UAV_OFFSET)
+		);
+
+		// Create scene light cluster buffer uav
+		uavDesc.Buffer.FirstElement = 0;
+		uavDesc.Buffer.NumElements = SCENE_FRUSTUM_CLUSTER_WIDTH * SCENE_FRUSTUM_CLUSTER_HEIGHT * SCENE_FRUSTUM_CLUSTER_DEPTH;
+		uavDesc.Buffer.StructureByteStride = SCENE_LIGHT_CLUSTER_SIZE;
+
+		device->CreateUnorderedAccessView(
+			sceneLightClusterBuffer,
+			nullptr,
+			&uavDesc,
+			getSceneDescHeapCPUHandle(SCENE_LIGHT_CLUSTER_BUFFER_UAV_OFFSET)
 		);
 
 		// Create scene geometry vbvs
@@ -1345,6 +1436,7 @@ namespace RIN {
 		// Record command lists here to minimize time spent waiting on the GPU
 		threadPool.enqueueJob([this]() { recordCullStaticCommandList(); });
 		threadPool.enqueueJob([this]() { recordCullDynamicCommandList(); });
+		threadPool.enqueueJob([this]() { recordLightClusterCommandList(); });
 		recordDepthMIPCommandList();
 		threadPool.wait();
 
@@ -1409,6 +1501,22 @@ namespace RIN {
 		if(cullDynamicCommandList) {
 			cullDynamicCommandList->Release();
 			cullDynamicCommandList = nullptr;
+		}
+		if(lightClusterRootSignature) {
+			lightClusterRootSignature->Release();
+			lightClusterRootSignature = nullptr;
+		}
+		if(lightClusterPipelineState) {
+			lightClusterPipelineState->Release();
+			lightClusterPipelineState = nullptr;
+		}
+		if(lightClusterCommandAllocator) {
+			lightClusterCommandAllocator->Release();
+			lightClusterCommandAllocator = nullptr;
+		}
+		if(lightClusterCommandList) {
+			lightClusterCommandList->Release();
+			lightClusterCommandList = nullptr;
 		}
 		if(sceneRTVDescHeap) {
 			sceneRTVDescHeap->Release();
@@ -1534,6 +1642,14 @@ namespace RIN {
 		if(sceneDynamicObjectBuffer) {
 			sceneDynamicObjectBuffer->Release();
 			sceneDynamicObjectBuffer = nullptr;
+		}
+		if(sceneLightBuffer) {
+			sceneLightBuffer->Release();
+			sceneLightBuffer = nullptr;
+		}
+		if(sceneLightClusterBuffer) {
+			sceneLightClusterBuffer->Release();
+			sceneLightClusterBuffer = nullptr;
 		}
 		if(sceneTextureHeap) {
 			sceneTextureHeap->Release();
@@ -1982,6 +2098,35 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to close dynamic culling command list");
 	}
 
+	void D3D12Renderer::recordLightClusterCommandList() {
+		// Reset command allocator to reuse its memory
+		HRESULT result = lightClusterCommandAllocator->Reset();
+		if(FAILED(result)) RIN_ERROR("Failed to reset light cluster command allocator");
+
+		// Put command list back in the recording state
+		result = lightClusterCommandList->Reset(lightClusterCommandAllocator, lightClusterPipelineState);
+		if(FAILED(result)) RIN_ERROR("Failed to reset light cluster command list");
+
+		// Descriptor binding
+		lightClusterCommandList->SetDescriptorHeaps(1, &sceneDescHeap);
+		lightClusterCommandList->SetComputeRootSignature(lightClusterRootSignature);
+		lightClusterCommandList->SetComputeRoot32BitConstant(0, config.lightCount, 0);
+		lightClusterCommandList->SetComputeRootConstantBufferView(1, sceneCameraBuffer->GetGPUVirtualAddress());
+		lightClusterCommandList->SetComputeRootShaderResourceView(2, sceneLightBuffer->GetGPUVirtualAddress());
+		lightClusterCommandList->SetComputeRootDescriptorTable(3, getSceneDescHeapGPUHandle(SCENE_LIGHT_CLUSTER_BUFFER_UAV_OFFSET));
+
+		// Dispatch
+		lightClusterCommandList->Dispatch(
+			SCENE_FRUSTUM_CLUSTER_WIDTH / LIGHT_CLUSTER_THREAD_GROUP_SIZE_X,
+			SCENE_FRUSTUM_CLUSTER_HEIGHT / LIGHT_CLUSTER_THREAD_GROUP_SIZE_Y,
+			SCENE_FRUSTUM_CLUSTER_DEPTH / LIGHT_CLUSTER_THREAD_GROUP_SIZE_Z
+		);
+
+		// Close command list once recording is done
+		result = lightClusterCommandList->Close();
+		if(FAILED(result)) RIN_ERROR("Failed to close light cluster command list");
+	}
+
 	void D3D12Renderer::recordSceneStaticCommandList() {
 		if(!diffuseIBLTexture) RIN_ERROR("Failed to record scene static command list because no diffuse IBL texture was set");
 		if(!specularIBLTexture) RIN_ERROR("Failed to record scene static command list because no specular IBL texture was set");
@@ -2019,7 +2164,9 @@ namespace RIN {
 		sceneStaticCommandList->SetGraphicsRoot32BitConstants(1, _countof(iblData), iblData, 0);
 		sceneStaticCommandList->SetGraphicsRootConstantBufferView(2, sceneCameraBuffer->GetGPUVirtualAddress());
 		sceneStaticCommandList->SetGraphicsRootShaderResourceView(3, sceneStaticObjectBuffer->GetGPUVirtualAddress());
-		sceneStaticCommandList->SetGraphicsRootDescriptorTable(4, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
+		sceneStaticCommandList->SetGraphicsRootShaderResourceView(4, sceneLightBuffer->GetGPUVirtualAddress());
+		sceneStaticCommandList->SetGraphicsRootShaderResourceView(5, sceneLightClusterBuffer->GetGPUVirtualAddress());
+		sceneStaticCommandList->SetGraphicsRootDescriptorTable(6, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
 
 		// Input-Assembler
 		sceneStaticCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -2088,7 +2235,9 @@ namespace RIN {
 		sceneDynamicCommandList->SetGraphicsRoot32BitConstants(1, _countof(iblData), iblData, 0);
 		sceneDynamicCommandList->SetGraphicsRootConstantBufferView(2, sceneCameraBuffer->GetGPUVirtualAddress());
 		sceneDynamicCommandList->SetGraphicsRootShaderResourceView(3, sceneDynamicObjectBuffer->GetGPUVirtualAddress());
-		sceneDynamicCommandList->SetGraphicsRootDescriptorTable(4, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
+		sceneDynamicCommandList->SetGraphicsRootShaderResourceView(4, sceneLightBuffer->GetGPUVirtualAddress());
+		sceneDynamicCommandList->SetGraphicsRootShaderResourceView(5, sceneLightClusterBuffer->GetGPUVirtualAddress());
+		sceneDynamicCommandList->SetGraphicsRootDescriptorTable(6, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
 
 		// Input-Assembler
 		sceneDynamicCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -2620,7 +2769,7 @@ namespace RIN {
 					);
 				},
 				0,
-					COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_INDEX
+					COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX
 				}
 			);
 		}
@@ -2686,7 +2835,7 @@ namespace RIN {
 					object->_resident = true;
 				},
 				sizeof(D3D12StaticObjectData),
-				COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_INDEX
+				COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX
 			}
 		);
 	}
@@ -3046,6 +3195,21 @@ namespace RIN {
 		sceneMaterialPool.remove(material);
 	}
 
+	Light* D3D12Renderer::addLight() {
+		Light* light = sceneLightPool.insert();
+		if(!light) return nullptr;
+
+		light->_resident = true;
+
+		return light;
+	}
+
+	void D3D12Renderer::removeLight(Light* light) {
+		if(!light) return;
+
+		sceneLightPool.remove(light);
+	}
+
 	void D3D12Renderer::setSkybox(Texture* skybox, Texture* diffuseIBL, Texture* specularIBL) {
 		if(!skybox || !diffuseIBL || !specularIBL) return;
 
@@ -3152,6 +3316,23 @@ namespace RIN {
 		}
 	}
 
+	void D3D12Renderer::uploadLightHelper(uint32_t startIndex, uint32_t endIndex) {
+		D3D12LightData* dataStart = (D3D12LightData*)(uploadBufferData + uploadLightOffset);
+
+		for(uint32_t i = startIndex; i < endIndex; ++i) {
+			Light* light = sceneLightPool.at(i);
+			D3D12LightData* lightData = dataStart + i;
+
+			if(light && light->resident()) {
+				lightData->position = light->position;
+				lightData->radius = light->radius;
+				lightData->color = light->color;
+
+				lightData->flags.show = 1;
+			} else lightData->flags.data = 0;
+		}
+	}
+
 	void D3D12Renderer::update() {
 		// Permit new uploads to be scheduled
 		uploadStreamAllocator.free();
@@ -3180,14 +3361,20 @@ namespace RIN {
 		D3D12CameraData* cameraData = (D3D12CameraData*)(uploadBufferData + uploadCameraOffset);
 		DirectX::XMStoreFloat4x4A(&cameraData->viewMatrix, sceneCamera.viewMatrix);
 		DirectX::XMStoreFloat4x4A(&cameraData->projMatrix, sceneCamera.projMatrix);
+		DirectX::XMStoreFloat4x4A(&cameraData->invProjMatrix, sceneCamera.invProjMatrix);
 		DirectX::XMStoreFloat4x4A(&cameraData->viewProjMatrix, DirectX::XMMatrixMultiply(sceneCamera.viewMatrix, sceneCamera.projMatrix));
 		DirectX::XMStoreFloat3A(&cameraData->position, sceneCamera.getPosition());
+
 		cameraData->frustumXX = sceneCamera.frustumXX;
 		cameraData->frustumXZ = sceneCamera.frustumXZ;
 		cameraData->frustumYY = sceneCamera.frustumYY;
 		cameraData->frustumYZ = sceneCamera.frustumYZ;
+
 		cameraData->nearZ = sceneCamera.nearZ;
 		cameraData->farZ = sceneCamera.farZ;
+
+		cameraData->clusterConstantA = sceneCamera.clusterConstantA;
+		cameraData->clusterConstantB = sceneCamera.clusterConstantB;
 
 		// Upload dynamic objects
 		uploadUpdateCommandList->CopyBufferRegion(
@@ -3198,23 +3385,44 @@ namespace RIN {
 			config.dynamicObjectCount * sizeof(D3D12DynamicObjectData)
 		);
 
+		// Upload lights
+		uploadUpdateCommandList->CopyBufferRegion(
+			sceneLightBuffer,
+			0,
+			uploadBuffer,
+			uploadLightOffset,
+			config.lightCount * sizeof(D3D12LightData)
+		);
+
 		// Exclude the current thread to avoid an extra context switch
 		const uint32_t spareThreads = COPY_QUEUE_COUNT >= threadPool.numThreads ? 0 : threadPool.numThreads - COPY_QUEUE_COUNT - 1;
-		const uint32_t step = config.dynamicObjectCount / (spareThreads + 1);
-		uint32_t startIndex = 0;
+
+		const uint32_t dynamicObjectStep = config.dynamicObjectCount / (spareThreads + 1);
+		uint32_t dynamicObjectStartIndex = 0;
 		for(uint32_t i = 0; i < spareThreads; ++i) {
-			const uint32_t endIndex = startIndex + step;
-			threadPool.enqueueJob([this, startIndex, endIndex]() { uploadDynamicObjectHelper(startIndex, endIndex); });
-			startIndex = endIndex;
+			const uint32_t dynamicObjectEndIndex = dynamicObjectStartIndex + dynamicObjectStep;
+			threadPool.enqueueJob([this, dynamicObjectStartIndex, dynamicObjectEndIndex]() { uploadDynamicObjectHelper(dynamicObjectStartIndex, dynamicObjectEndIndex); });
+			dynamicObjectStartIndex = dynamicObjectEndIndex;
 		}
-		uploadDynamicObjectHelper(startIndex, config.dynamicObjectCount);
+
+		const uint32_t lightStep = config.lightCount / (spareThreads + 1);
+		uint32_t lightStartIndex = 0;
+		for(uint32_t i = 0; i < spareThreads; ++i) {
+			const uint32_t lightEndIndex = lightStartIndex + lightStep;
+			threadPool.enqueueJob([this, lightStartIndex, lightEndIndex]() { uploadLightHelper(lightStartIndex, lightEndIndex); });
+			lightStartIndex = lightEndIndex;
+		}
+
+		uploadDynamicObjectHelper(dynamicObjectStartIndex, config.dynamicObjectCount);
+		uploadLightHelper(lightStartIndex, config.lightCount);
+
 		if(spareThreads) threadPool.wait();
 
 		// Submit command list
 		result = uploadUpdateCommandList->Close();
 		if(FAILED(result)) RIN_ERROR("Failed to close upload update command list");
 
-		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_INDEX]->ExecuteCommandLists(1, (ID3D12CommandList**)&uploadUpdateCommandList);
+		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX]->ExecuteCommandLists(1, (ID3D12CommandList**)&uploadUpdateCommandList);
 
 		uploadStreamBarrier.arrive_and_wait(); // Barrier 2
 	}
@@ -3271,19 +3479,19 @@ namespace RIN {
 		++graphicsFenceValue;
 
 		// Submit scene commands
-		// TODO: Want to do this in 2 passes instead of right here
-		computeQueue->ExecuteCommandLists(1, (ID3D12CommandList**)&depthMIPCommandList);
+		ID3D12CommandList* computeCommands[]{ depthMIPCommandList, lightClusterCommandList };
+		computeQueue->ExecuteCommandLists(_countof(computeCommands), computeCommands);
 
 		// Culling
-		ID3D12CommandList* cullCommands[] { cullStaticCommandList, cullDynamicCommandList };
+		ID3D12CommandList* cullCommands[]{ cullStaticCommandList, cullDynamicCommandList };
 		computeQueue->ExecuteCommandLists(_countof(cullCommands), cullCommands);
 		result = computeQueue->Signal(computeFence, ++computeFenceValue);
 		if(FAILED(result)) RIN_ERROR("Failed to signal compute queue");
-			
+		
 		// Scene rendering
 		result = graphicsQueue->Wait(computeFence, computeFenceValue);
 		if(FAILED(result)) RIN_ERROR("Failed to make graphics queue wait on compute queue");
-		ID3D12CommandList* sceneCommands[] { sceneStaticCommandList, sceneDynamicCommandList, skyboxCommandList };
+		ID3D12CommandList* sceneCommands[]{ sceneStaticCommandList, sceneDynamicCommandList, skyboxCommandList };
 		graphicsQueue->ExecuteCommandLists(_countof(sceneCommands), sceneCommands);
 			
 		// Post processing
@@ -3303,7 +3511,7 @@ namespace RIN {
 		if(FAILED(result)) RIN_DEBUG_ERROR("Failed to present frame on swap chain");
 
 		// Stall any sync copies until rendering is completed
-		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_INDEX]->Wait(graphicsFence, graphicsFenceValue);
+		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX]->Wait(graphicsFence, graphicsFenceValue);
 
 		// Frame synchronization
 		result = graphicsQueue->Signal(graphicsFence, graphicsFenceValue);

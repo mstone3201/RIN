@@ -2,6 +2,10 @@
 
 #include "Camera.hpp"
 
+constexpr uint32_t SCENE_FRUSTUM_CLUSTER_WIDTH = 16;
+constexpr uint32_t SCENE_FRUSTUM_CLUSTER_HEIGHT = 8;
+constexpr uint32_t SCENE_FRUSTUM_CLUSTER_DEPTH = 24;
+
 namespace RIN {
 	class D3D12Camera : public Camera {
 		friend class D3D12Renderer;
@@ -12,6 +16,8 @@ namespace RIN {
 		float frustumYZ;
 		float nearZ;
 		float farZ;
+		float clusterConstantA;
+		float clusterConstantB;
 
 		D3D12Camera() {
 			setPerspective(DirectX::XM_PIDIV2, 1.0f, 0.1f, 100.0f);
@@ -42,8 +48,14 @@ namespace RIN {
 			frustumXZ = right.z;
 			frustumYY = top.y;
 			frustumYZ = top.z;
+			
 			nearZ = -n;
 			farZ = -f;
+
+			float logNear = log2f(-nearZ);
+			// log2(-farZ / -nearZ) = log2(-farZ) - log2(-nearZ)
+			clusterConstantA = SCENE_FRUSTUM_CLUSTER_DEPTH / (log2f(-farZ) - logNear);
+			clusterConstantB = logNear * clusterConstantA;
 		}
 	};
 }

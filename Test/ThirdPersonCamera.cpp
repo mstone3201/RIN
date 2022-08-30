@@ -41,7 +41,7 @@ void ThirdPersonCamera::update(float elapsedSeconds) {
 
 	if(armLength != targetArmLength) {
 		float diff = targetArmLength - armLength;
-		if(fabsf(diff) < scrollEpsilon) armLength = targetArmLength;
+		if(fabsf(diff) < scrollEpsilon || elapsedSeconds * invScrollTime >= 1.0f) armLength = targetArmLength;
 		else armLength += diff * elapsedSeconds * invScrollTime;
 
 		viewDirty = true;

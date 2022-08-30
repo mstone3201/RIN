@@ -12,14 +12,17 @@ namespace RIN {
 	struct alignas(16) D3D12CameraData {
 		DirectX::XMFLOAT4X4A viewMatrix; // Column-major column vector matrix
 		DirectX::XMFLOAT4X4A projMatrix; // Column-major column vector matrix
+		DirectX::XMFLOAT4X4A invProjMatrix; // Column-major column vector matrix
 		DirectX::XMFLOAT4X4A viewProjMatrix; // Column-major column vector matrix
 		DirectX::XMFLOAT3A position;
-		float frustumXX; // View space right frustum plane x normal
-		float frustumXZ; // View space right frustum plane z normal
-		float frustumYY; // View space top frustum plane y normal
-		float frustumYZ; // View space top frustum plane z normal
+		float frustumXX; // View space right frustum plane x normal (pointing in)
+		float frustumXZ; // View space right frustum plane z normal (pointing in)
+		float frustumYY; // View space top frustum plane y normal (pointing in)
+		float frustumYZ; // View space top frustum plane z normal (pointing in)
 		float nearZ; // Negative since the camera faces -z
 		float farZ; // Negative since the camera faces -z
+		float clusterConstantA; // FRUSTUM_CLUSTER_DEPTH / log2(farZ / nearZ)
+		float clusterConstantB; // log2(nearZ) * clusterConstantA
 	};
 
 	struct D3D12BoundingSphereData {
@@ -72,5 +75,23 @@ namespace RIN {
 		D3D12LODData lods[LOD_COUNT];
 		D3D12MaterialData material;
 		D3D12ObjectFlagData flags;
+	};
+
+	union D3D12LightFlagData {
+		uint32_t data;
+		struct {
+			uint32_t show : 1;
+		};
+	};
+
+	/*
+	Representation of a light on the GPU
+	Aligned to float4
+	*/
+	struct alignas(16) D3D12LightData {
+		DirectX::XMFLOAT3 position;
+		float radius;
+		DirectX::XMFLOAT3 color;
+		D3D12LightFlagData flags;
 	};
 }

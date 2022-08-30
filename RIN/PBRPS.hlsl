@@ -7,6 +7,7 @@
 #include "PBRInputs.hlsli"
 #include "SceneObject.hlsli"
 #include "Camera.hlsli"
+#include "Light.hlsli"
 #include "Color.hlsli"
 #include "Util.hlsli"
 
@@ -19,16 +20,13 @@ struct RootConstants {
 
 ConstantBuffer<RootConstants> rootConstants : register(b0);
 ConstantBuffer<Camera> cameraBuffer : register(b1);
-Texture2D<float4> textures[] : register(t0);
-TextureCube<float4> cubeTextures[] : register(t0, space1);
+StructuredBuffer<Light> lightBuffer : register(t0);
+StructuredBuffer<LightCluster> lightClusterBuffer : register(t1);
+Texture2D<float4> textures[] : register(t0, space1);
+TextureCube<float4> cubeTextures[] : register(t0, space2);
 SamplerState textureSampler : register(s0);
 SamplerState cubeSampler : register(s1);
 SamplerState brdfLUTSampler : register(s2);
-
-// TODO: don't hard code these
-static float3 lightPos[2] = { float3(-1.75f, 0.0f, 1.75f), float3(5.0f, 1.0f, 3.0f) };
-static float3 lightColor[2] = { float3(13.47f, 11.31f, 10.79f), float3(13.47f, 11.31f, 10.79f) };
-static float lightRadius[2] = { 10.0f, 10.0f };
 
 float4 main(PBRInput input) : SV_TARGET {
 	float3 baseColor = textures[input.material.baseColorID].Sample(textureSampler, input.tex).xyz;
@@ -51,11 +49,20 @@ float4 main(PBRInput input) : SV_TARGET {
 
 	float NV = saturate(dot(N, V));
 
+	// Find the light cluster this fragment is inside of
+	float2 cluster_ij = (input.clipPos.xy / input.clipPos.w * 0.5f + 0.5f) * float2(FRUSTUM_CLUSTER_WIDTH, FRUSTUM_CLUSTER_HEIGHT);
+	float viewZ = getViewZClip(input.clipPos.z, cameraBuffer.projMatrix._m22_m23);
+	uint cluster_k = getClusterKConstants(viewZ, cameraBuffer.clusterConstantA, cameraBuffer.clusterConstantB);
+	cluster_k = min(cluster_k, FRUSTUM_CLUSTER_DEPTH - 1);
+	uint lightClusterOffset = getClusterOffset(uint3(cluster_ij, cluster_k));
+
 	// Accumulate point light contribution
 	float3 Ir = 0.0f;
-	for(uint i = 0; i < 2; i++) {
+	for(uint i = 0; i < lightClusterBuffer[lightClusterOffset].lightCount; i++) {
+		Light light = lightBuffer[lightClusterBuffer[lightClusterOffset].lights[i]];
+
 		// Light vector pointing from pixel to light
-		float3 L = lightPos[i] - input.worldPos;
+		float3 L = light.position - input.worldPos;
 		float distance = length(L);
 		L /= distance;
 		// Halfway vector between V and L
@@ -77,11 +84,11 @@ float4 main(PBRInput input) : SV_TARGET {
 		float3 R = Rs + d * Rd; // s = Fx, which is already in the numerator of Rs so it is omitted
 
 		// Light intensity - point light
-		float window = distance / lightRadius[i];
+		float window = distance / light.radius;
 		float window2 = window * window;
 		float numsqrt = saturate(1.0f - window2 * window2);
 		float falloff = numsqrt * numsqrt / (distance * distance + 1.0f);
-		float3 I = lightColor[i] * falloff;
+		float3 I = light.color * falloff;
 
 		// Total contribution from this light
 		Ir += I * NL * R;

@@ -42,6 +42,18 @@
     <Filter Include="Renderer\D3D12\_Source Files">
       <UniqueIdentifier>{5eaf9385-64e3-47f6-b446-1c10178e40cd}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shaders\D3D12\Header">
+      <UniqueIdentifier>{b80c81d2-ca54-4891-9470-03412ffbecf7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\D3D12\Compute">
+      <UniqueIdentifier>{760dc263-325c-436b-955e-97c6dc9c51d3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\D3D12\Vertex">
+      <UniqueIdentifier>{52dd69c4-eb55-4ee6-b9ff-56413546ac2b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\D3D12\Pixel">
+      <UniqueIdentifier>{4fa36673-99d9-4262-8a0b-136b6b85f55c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Debug.hpp">
@@ -122,6 +134,9 @@
     <ClInclude Include="D3D12ShaderData.hpp">
       <Filter>Renderer\D3D12\_Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Light.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Renderer.cpp">
@@ -141,52 +156,58 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="CullStaticCS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
-    </FxCompile>
-    <FxCompile Include="PBRStaticVS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
-    </FxCompile>
-    <FxCompile Include="PostPS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
-    </FxCompile>
-    <FxCompile Include="PostVS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
-    </FxCompile>
     <FxCompile Include="CullDynamicCS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
+      <Filter>Shaders\D3D12\Compute</Filter>
     </FxCompile>
-    <FxCompile Include="PBRDynamicVS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
+    <FxCompile Include="CullStaticCS.hlsl">
+      <Filter>Shaders\D3D12\Compute</Filter>
     </FxCompile>
     <FxCompile Include="DepthMIPCS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
+      <Filter>Shaders\D3D12\Compute</Filter>
     </FxCompile>
-    <FxCompile Include="PBRPS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
+    <FxCompile Include="LightClusterCS.hlsl">
+      <Filter>Shaders\D3D12\Compute</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRDynamicVS.hlsl">
+      <Filter>Shaders\D3D12\Vertex</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRStaticVS.hlsl">
+      <Filter>Shaders\D3D12\Vertex</Filter>
+    </FxCompile>
+    <FxCompile Include="PostVS.hlsl">
+      <Filter>Shaders\D3D12\Vertex</Filter>
     </FxCompile>
     <FxCompile Include="SkyboxVS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
+      <Filter>Shaders\D3D12\Vertex</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRPS.hlsl">
+      <Filter>Shaders\D3D12\Pixel</Filter>
+    </FxCompile>
+    <FxCompile Include="PostPS.hlsl">
+      <Filter>Shaders\D3D12\Pixel</Filter>
     </FxCompile>
     <FxCompile Include="SkyboxPS.hlsl">
-      <Filter>Shaders\D3D12</Filter>
+      <Filter>Shaders\D3D12\Pixel</Filter>
     </FxCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="SceneObject.hlsli">
-      <Filter>Shaders\D3D12</Filter>
-    </None>
     <None Include="Camera.hlsli">
-      <Filter>Shaders\D3D12</Filter>
-    </None>
-    <None Include="PBRInputs.hlsli">
-      <Filter>Shaders\D3D12</Filter>
+      <Filter>Shaders\D3D12\Header</Filter>
     </None>
     <None Include="Color.hlsli">
-      <Filter>Shaders\D3D12</Filter>
+      <Filter>Shaders\D3D12\Header</Filter>
+    </None>
+    <None Include="Light.hlsli">
+      <Filter>Shaders\D3D12\Header</Filter>
+    </None>
+    <None Include="SceneObject.hlsli">
+      <Filter>Shaders\D3D12\Header</Filter>
     </None>
     <None Include="Util.hlsli">
-      <Filter>Shaders\D3D12</Filter>
+      <Filter>Shaders\D3D12\Header</Filter>
+    </None>
+    <None Include="PBRInputs.hlsli">
+      <Filter>Shaders\D3D12\Header</Filter>
     </None>
   </ItemGroup>
 </Project>

@@ -21,9 +21,11 @@ StructuredBuffer<StaticObject> staticObjectBuffer : register(t0);
 	"RootConstants(num32BitConstants = 4, b0, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"CBV(b1),"\
 	"SRV(t0, visibility = SHADER_VISIBILITY_VERTEX),"\
+	"SRV(t0, visibility = SHADER_VISIBILITY_PIXEL),"\
+	"SRV(t1, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"DescriptorTable("\
-		"SRV(t0, numDescriptors = unbounded, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
-		"SRV(t0, numDescriptors = unbounded, space = 1, offset = 0, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
+		"SRV(t0, numDescriptors = unbounded, space = 1, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
+		"SRV(t0, numDescriptors = unbounded, space = 2, offset = 0, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
 		"visibility = SHADER_VISIBILITY_PIXEL"
 	"),"\
 	"StaticSampler(s0, visibility = SHADER_VISIBILITY_PIXEL),"\
@@ -50,6 +52,7 @@ PBRInput main(
 ) {
 	PBRInput output;
 	output.position = mul(cameraBuffer.viewProjMatrix, float4(position, 1.0f));
+	output.clipPos = output.position;
 	output.worldPos = position;
 	output.tbn = float3x3(tangent, binormal, normal); // This is a row-major row vector matrix (x * A)
 	output.tex = tex;

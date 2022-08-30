@@ -23,5 +23,6 @@ namespace RIN {
 		uint64_t texturesSize = 0; // Cumulative size of all textures in bytes
 		uint32_t textureCount = 0;
 		uint32_t materialCount = 0;
+		uint32_t lightCount = 0;
 	};
 }

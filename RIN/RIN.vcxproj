@@ -175,6 +175,7 @@
     <ClInclude Include="D3D12Texture.hpp" />
     <ClInclude Include="DynamicObject.hpp" />
     <ClInclude Include="DynamicMesh.hpp" />
+    <ClInclude Include="Light.hpp" />
     <ClInclude Include="Material.hpp" />
     <ClInclude Include="Config.hpp" />
     <ClInclude Include="Debug.hpp" />
@@ -193,6 +194,7 @@
     <ClInclude Include="VertexData.hpp" />
     <None Include="Camera.hlsli" />
     <None Include="Color.hlsli" />
+    <None Include="Light.hlsli" />
     <None Include="PBRInputs.hlsli" />
     <None Include="SceneObject.hlsli" />
     <None Include="Util.hlsli" />
@@ -218,6 +220,12 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
     </FxCompile>
     <FxCompile Include="DepthMIPCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+    </FxCompile>
+    <FxCompile Include="LightClusterCS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>

@@ -129,6 +129,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 	config.texturesSize = 2231369728; // ~ 100 fully mipped 2048 x 2048 textures (2.2 gb)
 	config.textureCount = 1000;
 	config.materialCount = 200;
+	config.lightCount = 128;
 
 	RIN::Settings settings{};
 	settings.backBufferWidth = 1920;
@@ -262,6 +263,20 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 		RIN::DynamicObject* object = renderer->addDynamicObject(mesh, metalMaterial);
 		if(object) nodes[i] = sceneGraph.addNode(SceneGraph::ROOT_NODE, object);
 	}
+
+	std::vector<RIN::Light*> lights;
+	lights.reserve(config.lightCount);
+	for(uint32_t i = 0; i < config.lightCount; ++i) {
+		auto light = renderer->addLight();
+		if(light) {
+			light->color.x = 4.0f * (config.lightCount - i) / config.lightCount;
+			light->color.y = 8.0f * i / config.lightCount;
+			light->color.z = 8.0f * (config.lightCount - i) / config.lightCount;
+			light->radius = 2.5f;
+
+			lights.push_back(light);
+		}
+	}
 	// End remove
 
 	renderer->showWindow();
@@ -294,6 +309,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 		if(nodes[3]) nodes[3]->setTansform(DirectX::XMMatrixScaling(0.125f, 0.25f, 0.25f) * DirectX::XMMatrixTranslation(1.0f, -1.0f, 1.5f));
 		if(nodes[4]) nodes[4]->setTansform(DirectX::XMMatrixRotationZ(cumulativeElapsed / 2.5f * DirectX::XM_2PI) * DirectX::XMMatrixScaling(0.9f, 0.9f, 1.0f) * DirectX::XMMatrixRotationZ(-DirectX::XM_PI + DirectX::XM_PIDIV4) * DirectX::XMMatrixTranslation(5.0f, 5.0f, 2.0f));
 		if(nodes[5]) nodes[5]->setTansform(DirectX::XMMatrixRotationY(cumulativeElapsed / 2.5f * DirectX::XM_2PI) * DirectX::XMMatrixTranslation(-3.0f, 0.0f, 1.0f));
+
+		for(uint32_t i = 0; i < lights.size(); ++i) {
+			RIN::Light* light = lights[i];
+
+			DirectX::XMMATRIX M = DirectX::XMMatrixTranslation(3.5f, 0.0f, 2.0f) * DirectX::XMMatrixRotationZ((cumulativeElapsed / 2.5f + (float)i / config.lightCount) * DirectX::XM_2PI);
+			DirectX::XMStoreFloat3(&light->position, DirectX::XMVector4Transform({0.0f, 0.0f, 0.0f, 1.0f}, M));
+		}
 
 		sceneGraph.update();
 

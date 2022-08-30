@@ -3,6 +3,7 @@
 struct Camera {
 	float4x4 viewMatrix;
 	float4x4 projMatrix;
+	float4x4 invProjMatrix;
 	float4x4 viewProjMatrix;
 	float3 position;
 	float padding0;
@@ -12,7 +13,8 @@ struct Camera {
 	float frustumYZ;
 	float nearZ; // Negative
 	float farZ; // Negative
-	float2 padding1;
+	float clusterConstantA;
+	float clusterConstantB;
 };
 
 // Returns false if the view space sphere is completely outside of the frustum
@@ -93,4 +95,32 @@ bool getProjectedSphereAABB(float3 C, float r, float nearZ, float2 ab, out float
 	aabb = float4(leftX, bottomY, rightX, topY);
 
 	return true;
+}
+
+// Returns view space z from NDC space z
+float getViewZNDC(float zNDC, float2 cd) {
+	/*
+	c = projMatrix._m22
+	d = projMatrix._m23
+
+	zNDC = (cz + d) / -z
+	zNDC * -z = cz + d
+	zNDC * -z - cz = d
+	-z(zNDC + c) = d
+	z = -d / (zNDC + c)
+	*/
+	return -cd.y / (zNDC + cd.x);
+}
+
+// Returns view space z from clip space z
+float getViewZClip(float zClip, float2 cd) {
+	/*
+	c = projMatrix._m22
+	d = projMatrix._m23
+
+	zClip = cz + d
+	cz = zClip - d
+	z = (zClip - d) / c
+	*/
+	return (zClip - cd.y) / cd.x;
 }

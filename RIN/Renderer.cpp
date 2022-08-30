@@ -21,7 +21,8 @@ namespace RIN {
 		if(!config.dynamicObjectCount) RIN_ERROR("Dynamic object count must not be 0");
 		if(!config.texturesSize) RIN_ERROR("Textures size must not be 0");
 		if(!config.textureCount) RIN_ERROR("Texture count must not be 0");
-		if(!config.materialCount) RIN_ERROR("Material size must not be 0");
+		if(!config.materialCount) RIN_ERROR("Material count must not be 0");
+		if(!config.lightCount) RIN_ERROR("Light count must not be 0");
 
 		if(!settings.backBufferWidth) RIN_ERROR("Back buffer width must not be 0");
 		if(!settings.backBufferHeight) RIN_ERROR("Back buffer height must not be 0");

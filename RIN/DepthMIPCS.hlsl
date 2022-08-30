@@ -9,7 +9,7 @@ SamplerState parentMIPSampler : register(s0);
 
 [RootSignature(
 	"RootFlags(0),"\
-	"RootConstants(num32BitConstants=2, b0),"\
+	"RootConstants(num32BitConstants = 2, b0),"\
 	"DescriptorTable(SRV(t0)),"\
 	"DescriptorTable(UAV(u0)),"\
 	"StaticSampler("\
