@@ -10,6 +10,7 @@ namespace RIN {
 
 	enum class MATERIAL_TYPE : uint32_t {
 		PBR_STANDARD,
+		PBR_EMISSIVE,
 		PBR_CLEAR_COAT,
 		PBR_SHEEN
 	};
@@ -119,6 +120,24 @@ namespace RIN {
 			switch(type) {
 			case MATERIAL_TYPE::PBR_STANDARD:
 				if(special) RIN_ERROR("Standard PBR material does not support a special texture");
+				break;
+			case MATERIAL_TYPE::PBR_EMISSIVE:
+				if(!special) RIN_ERROR("emissive PBR material requires a special texture");
+				switch(special->format) {
+				case TEXTURE_FORMAT::R8G8B8A8_UNORM:
+				case TEXTURE_FORMAT::R8G8B8A8_UNORM_SRGB:
+				case TEXTURE_FORMAT::B8G8R8A8_UNORM:
+				case TEXTURE_FORMAT::B8G8R8A8_UNORM_SRGB:
+				case TEXTURE_FORMAT::R16B16G16A16_FLOAT:
+				case TEXTURE_FORMAT::R32G32B32A32_FLOAT:
+				case TEXTURE_FORMAT::BC3_UNORM:
+				case TEXTURE_FORMAT::BC3_UNORM_SRGB:
+				case TEXTURE_FORMAT::BC7_UNORM:
+				case TEXTURE_FORMAT::BC7_UNORM_SRGB:
+					break;
+				default:
+					RIN_ERROR("Invalid emissive material special texture format");
+				}
 				break;
 			case MATERIAL_TYPE::PBR_CLEAR_COAT:
 			case MATERIAL_TYPE::PBR_SHEEN:

@@ -29,6 +29,9 @@
     <ClCompile Include="FilePool.cpp">
       <Filter>_Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="FirstPersonCamera.cpp">
+      <Filter>_Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Timer.hpp">
@@ -51,6 +54,9 @@
     </ClInclude>
     <ClInclude Include="PoolTest.hpp">
       <Filter>Testing</Filter>
+    </ClInclude>
+    <ClInclude Include="FirstPersonCamera.hpp">
+      <Filter>_Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

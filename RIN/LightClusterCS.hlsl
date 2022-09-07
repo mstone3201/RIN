@@ -54,7 +54,7 @@ void main(
 	for(uint i = 0; lightCount < LIGHT_CLUSTER_LIGHT_COUNT && i < lightBufferLength.length; ++i) {
 		Light light = lightBuffer[i];
 
-		if(light.flags) {
+		if(getLightFlagShowField(light.flags)) {
 			float4 lightPos = mul(cameraBuffer.viewMatrix, float4(light.position, 1.0f));
 
 			// Calculate the squared distance to the aabb

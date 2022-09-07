@@ -17,6 +17,10 @@ struct LightCluster {
 	uint lights[LIGHT_CLUSTER_LIGHT_COUNT];
 };
 
+uint getLightFlagShowField(uint flags) {
+	return flags & 1;
+}
+
 // Ola Olsson, Markus Billeter, and Ulf Assarsson, Clustered Deferred and Forward Shading, High Performance Graphics (2012)
 // https://www.cse.chalmers.se/~uffe/clustered_shading_preprint.pdf
 

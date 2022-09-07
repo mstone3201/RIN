@@ -9,14 +9,14 @@ Input::Input(HWND hwnd) :
 	hwnd(hwnd),
 	keybinds{
 		VK_LBUTTON,
-		VK_RBUTTON
-	},
-	verticalScroll(0.0f),
-	horizontalScroll(0.0f),
-	mdx(0),
-	mdy(0),
-	mx(0),
-	my(0)
+		VK_RBUTTON,
+		'W',
+		'D',
+		'S',
+		'A',
+		VK_SPACE,
+		VK_SHIFT
+	}
 {
 	RAWINPUTDEVICE rid[2]{};
 	rid[0].usUsagePage = HID_USAGE_PAGE_GENERIC;

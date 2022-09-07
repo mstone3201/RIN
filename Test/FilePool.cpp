@@ -3,11 +3,6 @@
 #include <fstream>
 #include <iostream>
 
-FilePool::File::File() :
-	_size(0),
-	_data(nullptr)
-{}
-
 FilePool::File::File(const File& other) {
 	_size = other._size;
 	_data = new char[_size];
@@ -24,7 +19,11 @@ FilePool::File::File(File&& other) noexcept {
 }
 
 FilePool::File::~File() {
-	if(_data) delete[] _data;
+	if(_data) {
+		delete[] _data;
+		_data = nullptr;
+	}
+	_size = 0;
 }
 
 FilePool::File& FilePool::File::operator=(const File& other) {

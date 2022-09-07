@@ -18,6 +18,8 @@
 #include "D3D12Camera.hpp"
 #include "D3D12StaticMesh.hpp"
 #include "D3D12DynamicMesh.hpp"
+#include "D3D12SkinnedMesh.hpp"
+#include "D3D12Armature.hpp"
 #include "D3D12Texture.hpp"
 
 namespace RIN {
@@ -100,6 +102,7 @@ namespace RIN {
 		char* uploadBufferData{};
 		uint64_t uploadCameraOffset;
 		uint64_t uploadDynamicObjectOffset;
+		uint64_t uploadBoneOffset;
 		uint64_t uploadLightOffset;
 		uint64_t uploadStreamOffset;
 		// Upload stream
@@ -107,7 +110,7 @@ namespace RIN {
 		ID3D12GraphicsCommandList* uploadUpdateCommandList{};
 		BumpAllocator uploadStreamAllocator;
 		std::mutex uploadStreamMutex;
-		std::barrier<> uploadStreamBarrier{COPY_QUEUE_COUNT + 1};
+		std::barrier<> uploadStreamBarrier{ COPY_QUEUE_COUNT + 1 };
 		std::thread uploadStreamThreads[COPY_QUEUE_COUNT]{};
 		std::queue<UploadStreamRequest> uploadStreamQueue;
 		uint64_t uploadStreamBudget{};
@@ -125,10 +128,14 @@ namespace RIN {
 		ID3D12PipelineState* cullStaticPipelineState{};
 		ID3D12RootSignature* cullDynamicRootSignature{};
 		ID3D12PipelineState* cullDynamicPipelineState{};
+		ID3D12RootSignature* cullSkinnedRootSignature{};
+		ID3D12PipelineState* cullSkinnedPipelineState{};
 		ID3D12CommandAllocator* cullStaticCommandAllocator{};
 		ID3D12GraphicsCommandList* cullStaticCommandList{};
 		ID3D12CommandAllocator* cullDynamicCommandAllocator{};
 		ID3D12GraphicsCommandList* cullDynamicCommandList{};
+		ID3D12CommandAllocator* cullSkinnedCommandAllocator{};
+		ID3D12GraphicsCommandList* cullSkinnedCommandList{};
 		// Light clustering
 		ID3D12RootSignature* lightClusterRootSignature{};
 		ID3D12PipelineState* lightClusterPipelineState{};
@@ -143,10 +150,15 @@ namespace RIN {
 		ID3D12RootSignature* sceneDynamicRootSignature{};
 		ID3D12CommandSignature* sceneDynamicCommandSignature{};
 		ID3D12PipelineState* sceneDynamicPBRPipelineState{};
+		ID3D12RootSignature* sceneSkinnedRootSignature{};
+		ID3D12CommandSignature* sceneSkinnedCommandSignature{};
+		ID3D12PipelineState* sceneSkinnedPBRPipelineState{};
 		ID3D12CommandAllocator* sceneStaticCommandAllocator{};
 		ID3D12GraphicsCommandList* sceneStaticCommandList{};
 		ID3D12CommandAllocator* sceneDynamicCommandAllocator{};
 		ID3D12GraphicsCommandList* sceneDynamicCommandList{};
+		ID3D12CommandAllocator* sceneSkinnedCommandAllocator{};
+		ID3D12GraphicsCommandList* sceneSkinnedCommandList{};
 		// Skybox
 		ID3D12RootSignature* skyboxRootSignature{};
 		ID3D12PipelineState* skyboxPipelineState{};
@@ -173,26 +185,36 @@ namespace RIN {
 		ID3D12Resource* sceneCameraBuffer{};
 		ID3D12Resource* sceneStaticCommandBuffer{};
 		ID3D12Resource* sceneDynamicCommandBuffer{};
+		ID3D12Resource* sceneSkinnedCommandBuffer{};
 		ID3D12Resource* sceneStaticVertexBuffer{};
 		ID3D12Resource* sceneDynamicVertexBuffer{};
+		ID3D12Resource* sceneSkinnedVertexBuffer{};
 		ID3D12Resource* sceneStaticIndexBuffer{};
 		ID3D12Resource* sceneDynamicIndexBuffer{};
+		ID3D12Resource* sceneSkinnedIndexBuffer{};
 		ID3D12Resource* sceneStaticObjectBuffer{};
 		ID3D12Resource* sceneDynamicObjectBuffer{};
+		ID3D12Resource* sceneSkinnedObjectBuffer{};
+		ID3D12Resource* sceneBoneBuffer{};
 		ID3D12Resource* sceneLightBuffer{};
 		ID3D12Resource* sceneLightClusterBuffer{};
 		D3D12_VERTEX_BUFFER_VIEW postScreenQuadVBV{};
 		D3D12_VERTEX_BUFFER_VIEW skyboxVBV{};
 		D3D12_VERTEX_BUFFER_VIEW sceneStaticVBV{};
 		D3D12_VERTEX_BUFFER_VIEW sceneDynamicVBV{};
+		D3D12_VERTEX_BUFFER_VIEW sceneSkinnedVBV{};
 		D3D12_INDEX_BUFFER_VIEW sceneStaticIBV{};
 		D3D12_INDEX_BUFFER_VIEW sceneDynamicIBV{};
+		D3D12_INDEX_BUFFER_VIEW sceneSkinnedIBV{};
 		ID3D12Heap* sceneTextureHeap{};
 
 		FreeListAllocator sceneStaticVertexAllocator;
 		FreeListAllocator sceneStaticIndexAllocator;
 		FreeListAllocator sceneDynamicVertexAllocator;
 		FreeListAllocator sceneDynamicIndexAllocator;
+		FreeListAllocator sceneSkinnedVertexAllocator;
+		FreeListAllocator sceneSkinnedIndexAllocator;
+		FreeListAllocator sceneBoneAllocator;
 		FreeListAllocator sceneTextureAllocator;
 
 		D3D12Camera sceneCamera;
@@ -200,6 +222,9 @@ namespace RIN {
 		DynamicPool<StaticObject> sceneStaticObjectPool;
 		DynamicPool<D3D12DynamicMesh> sceneDynamicMeshPool;
 		DynamicPool<DynamicObject> sceneDynamicObjectPool;
+		DynamicPool<D3D12SkinnedMesh> sceneSkinnedMeshPool;
+		DynamicPool<SkinnedObject> sceneSkinnedObjectPool;
+		DynamicPool<D3D12Armature> sceneArmaturePool;
 		DynamicPool<D3D12Texture> sceneTexturePool;
 		DynamicPool<Material> sceneMaterialPool;
 		DynamicPool<Light> sceneLightPool;
@@ -209,9 +234,8 @@ namespace RIN {
 		D3D12Texture* brdfLUT{};
 		// It is unlikely that the brdfLUT will change, so if it does just record the
 		// skybox commands again anyway to avoid extra logic and bookkeeping
-		bool skyboxDirty = false;
-
-		// GUI
+		bool skyboxDirty = true;
+		Bone* sceneBones;
 
 		// Initialization
 		D3D12Renderer(HWND hwnd, const Config& config, const Settings& settings);
@@ -233,15 +257,18 @@ namespace RIN {
 		void recordDepthMIPCommandList();
 		void recordCullStaticCommandList();
 		void recordCullDynamicCommandList();
+		void recordCullSkinnedCommandList();
 		void recordLightClusterCommandList();
 		void recordSceneStaticCommandList();
 		void recordSceneDynamicCommandList();
+		void recordSceneSkinnedCommandList();
 		void recordSkyboxCommandList();
 		void recordPostCommandList();
 
 		// Upload stream
 		void uploadStreamWork(uint32_t copyQueueIndex);
 		void uploadDynamicObjectHelper(uint32_t startIndex, uint32_t endIndex);
+		void uploadBoneHelper(uint32_t startIndex, uint32_t endIndex);
 		void uploadLightHelper(uint32_t startIndex, uint32_t endIndex);
 		void destroyDeadTextures();
 
@@ -279,6 +306,20 @@ namespace RIN {
 		void removeDynamicMesh(DynamicMesh* mesh) override;
 		DynamicObject* addDynamicObject(DynamicMesh* mesh, Material* material) override;
 		void removeDynamicObject(DynamicObject* object) override;
+		SkinnedMesh* addSkinnedMesh(
+			const BoundingSphere& boundingSphere,
+			const SkinnedVertex* vertices,
+			const uint32_t* vertexCounts,
+			const index_type* indices,
+			const uint32_t* indexCounts,
+			uint32_t lodCount
+		) override;
+		void removeSkinnedMesh(SkinnedMesh* mesh) override;
+		SkinnedObject* addSkinnedObject(SkinnedMesh* mesh, Armature* armature, Material* material) override;
+		void removeSkinnedObject(SkinnedObject* object) override;
+		void updateSkinnedObject(SkinnedObject* object) override;
+		Armature* addArmature(uint8_t boneCount) override;
+		void removeArmature(Armature* armature) override;
 		// Setting mipCount to -1 will use the full mip chain
 		Texture* addTexture(
 			TEXTURE_TYPE type,

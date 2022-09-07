@@ -19,6 +19,12 @@ namespace RIN {
 		if(!config.dynamicIndexCount) RIN_ERROR("Dynamic index count must not be 0");
 		if(!config.dynamicMeshCount) RIN_ERROR("Dynamic mesh count must not be 0");
 		if(!config.dynamicObjectCount) RIN_ERROR("Dynamic object count must not be 0");
+		if(!config.skinnedVertexCount) RIN_ERROR("Skinned vertex count must not be 0");
+		if(!config.skinnedIndexCount) RIN_ERROR("Skinned index count must not be 0");
+		if(!config.skinnedMeshCount) RIN_ERROR("Skinned mesh count must not be 0");
+		if(!config.skinnedObjectCount) RIN_ERROR("Skinned object count must not be 0");
+		if(!config.boneCount) RIN_ERROR("Bone count must not be 0");
+		if(!config.armatureCount) RIN_ERROR("Armature count must not be 0");
 		if(!config.texturesSize) RIN_ERROR("Textures size must not be 0");
 		if(!config.textureCount) RIN_ERROR("Texture count must not be 0");
 		if(!config.materialCount) RIN_ERROR("Material count must not be 0");

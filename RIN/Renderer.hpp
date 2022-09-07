@@ -12,9 +12,12 @@
 #include "StaticObject.hpp"
 #include "DynamicMesh.hpp"
 #include "DynamicObject.hpp"
+#include "SkinnedMesh.hpp"
+#include "SkinnedObject.hpp"
 #include "Texture.hpp"
 #include "Material.hpp"
 #include "Light.hpp"
+#include "Armature.hpp"
 
 /*
 Using DirectXMath
@@ -72,6 +75,13 @@ namespace RIN {
 	Renderer::removeDynamicMesh is thread-safe
 	Renderer::addDynamicObject is thread-safe
 	Renderer::removeDynamicObject is thread-safe
+	Renderer::addSkinnedMesh is thread-safe
+	Renderer::removeSkinnedMesh is thread-safe
+	Renderer::addSkinnedObject is thread-safe
+	Renderer::removeSkinnedObject is thread-safe
+	Renderer::updateSkinnedObject is thread-safe
+	Renderer::addArmature is thread-safe
+	Renderer::removeArmature is thread-safe
 	Renderer::addTexture is thread-safe
 	Renderer::removeTexture is thread-safe
 	Renderer::addMaterial is thread-safe
@@ -130,6 +140,20 @@ namespace RIN {
 		virtual void removeDynamicMesh(DynamicMesh* mesh) = 0;
 		virtual DynamicObject* addDynamicObject(DynamicMesh* mesh, Material* material) = 0;
 		virtual void removeDynamicObject(DynamicObject* object) = 0;
+		virtual SkinnedMesh* addSkinnedMesh(
+			const BoundingSphere& boundingSphere,
+			const SkinnedVertex* vertices,
+			const uint32_t* vertexCounts,
+			const index_type* indices,
+			const uint32_t* indexCounts,
+			uint32_t lodCount
+		) = 0;
+		virtual void removeSkinnedMesh(SkinnedMesh* mesh) = 0;
+		virtual SkinnedObject* addSkinnedObject(SkinnedMesh* mesh, Armature* armature, Material* material) = 0;
+		virtual void removeSkinnedObject(SkinnedObject* object) = 0;
+		virtual void updateSkinnedObject(SkinnedObject* object) = 0;
+		virtual Armature* addArmature(uint8_t boneCount) = 0;
+		virtual void removeArmature(Armature* armature) = 0;
 		// Setting mipCount to -1 will use the full mip chain
 		virtual Texture* addTexture(
 			TEXTURE_TYPE type,
@@ -154,7 +178,6 @@ namespace RIN {
 		virtual void removeLight(Light*) = 0;
 		virtual void setSkybox(Texture* skybox, Texture* diffuseIBL, Texture* specularIBL) = 0;
 		virtual void setBRDFLUT(Texture* texture) = 0;
-		// GUI
 		// Update and commit upload
 		virtual void update() = 0;
 

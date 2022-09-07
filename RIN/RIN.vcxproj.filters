@@ -137,6 +137,24 @@
     <ClInclude Include="Light.hpp">
       <Filter>Renderer\_Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SkinnedMesh.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SkinnedObject.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12SkinnedMesh.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Bone.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Armature.hpp">
+      <Filter>Renderer\_Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D3D12Armature.hpp">
+      <Filter>Renderer\D3D12\_Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Renderer.cpp">
@@ -188,6 +206,12 @@
     </FxCompile>
     <FxCompile Include="SkyboxPS.hlsl">
       <Filter>Shaders\D3D12\Pixel</Filter>
+    </FxCompile>
+    <FxCompile Include="PBRSkinnedVS.hlsl">
+      <Filter>Shaders\D3D12\Vertex</Filter>
+    </FxCompile>
+    <FxCompile Include="CullSkinnedCS.hlsl">
+      <Filter>Shaders\D3D12\Compute</Filter>
     </FxCompile>
   </ItemGroup>
   <ItemGroup>

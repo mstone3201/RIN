@@ -3,17 +3,16 @@
 #include "BoundingSphere.hpp"
 
 namespace RIN {
-	class DynamicMesh {
+	class SkinnedMesh {
 	protected:
 		const BoundingSphere boundingSphere;
 		bool _resident = false;
 
-		DynamicMesh(const BoundingSphere& boundingSphere) :
-			boundingSphere(boundingSphere)
-		{}
+		SkinnedMesh(const BoundingSphere& boundingSphere) :
+			boundingSphere(boundingSphere) {}
 
-		DynamicMesh(const DynamicMesh&) = delete;
-		virtual ~DynamicMesh() = 0;
+		SkinnedMesh(const SkinnedMesh&) = delete;
+		virtual ~SkinnedMesh() = 0;
 	public:
 		// Check this to determine if it is safe to free the
 		// buffers used to create the mesh
@@ -23,5 +22,5 @@ namespace RIN {
 	};
 
 	// inline allows the definition to reside here even if it is included multiple times
-	inline DynamicMesh::~DynamicMesh() {}
+	inline SkinnedMesh::~SkinnedMesh() {}
 }

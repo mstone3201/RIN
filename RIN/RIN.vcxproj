@@ -165,12 +165,16 @@
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Armature.hpp" />
+    <ClInclude Include="Bone.hpp" />
     <ClInclude Include="BoundingSphere.hpp" />
     <ClInclude Include="BumpAllocator.hpp" />
     <ClInclude Include="Camera.hpp" />
+    <ClInclude Include="D3D12Armature.hpp" />
     <ClInclude Include="D3D12Camera.hpp" />
     <ClInclude Include="D3D12DynamicMesh.hpp" />
     <ClInclude Include="D3D12ShaderData.hpp" />
+    <ClInclude Include="D3D12SkinnedMesh.hpp" />
     <ClInclude Include="D3D12StaticMesh.hpp" />
     <ClInclude Include="D3D12Texture.hpp" />
     <ClInclude Include="DynamicObject.hpp" />
@@ -187,6 +191,8 @@
     <ClInclude Include="Renderer.hpp" />
     <ClInclude Include="Settings.hpp" />
     <ClInclude Include="FreeListAllocator.hpp" />
+    <ClInclude Include="SkinnedMesh.hpp" />
+    <ClInclude Include="SkinnedObject.hpp" />
     <ClInclude Include="StaticObject.hpp" />
     <ClInclude Include="StaticMesh.hpp" />
     <ClInclude Include="Texture.hpp" />
@@ -208,6 +214,12 @@
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="CullDynamicCS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Compute</ShaderType>
+    </FxCompile>
+    <FxCompile Include="CullSkinnedCS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Compute</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Compute</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Compute</ShaderType>
@@ -242,6 +254,12 @@
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
+    </FxCompile>
+    <FxCompile Include="PBRSkinnedVS.hlsl">
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Vertex</ShaderType>
+      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
     </FxCompile>
     <FxCompile Include="PBRStaticVS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>

@@ -42,11 +42,8 @@ SamplerState depthHierarchySampler : register(s0);
 void main(
 	uint3 index : SV_DispatchThreadID
 ) {
-	/*
-	TODO: Use wave intrinsics
-	*/
 	DynamicObject object = dynamicObjectBuffer[index.x];
-	if(object.flags) {
+	if(getObjectFlagShowField(object.flags)) {
 		float3 a = float3(object.worldMatrix[0].xyz);
 		float a2 = dot(a, a);
 		float3 b = float3(object.worldMatrix[1].xyz);

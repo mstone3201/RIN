@@ -20,6 +20,12 @@ namespace RIN {
 		uint32_t dynamicIndexCount = 0;
 		uint32_t dynamicMeshCount = 0;
 		uint32_t dynamicObjectCount = 0;
+		uint32_t skinnedVertexCount = 0;
+		uint32_t skinnedIndexCount = 0;
+		uint32_t skinnedMeshCount = 0;
+		uint32_t skinnedObjectCount = 0;
+		uint32_t boneCount = 0;
+		uint32_t armatureCount = 0;
 		uint64_t texturesSize = 0; // Cumulative size of all textures in bytes
 		uint32_t textureCount = 0;
 		uint32_t materialCount = 0;

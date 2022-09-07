@@ -6,23 +6,19 @@
 
 #include "Input.hpp"
 
-class ThirdPersonCamera {
+class FirstPersonCamera {
 	RIN::Camera& camera;
 	const Input* input;
 	// View
-	DirectX::XMVECTOR focus{};
+	DirectX::XMVECTOR position{};
 	float yaw{};
 	float pitch{};
-	float armLength{};
-	float targetArmLength{};
 	bool viewDirty = false;
 public:
-	ThirdPersonCamera(RIN::Camera& camera, const Input* input);
-	ThirdPersonCamera(const ThirdPersonCamera&) = delete;
+	FirstPersonCamera(RIN::Camera& camera, const Input* input);
+	FirstPersonCamera(const FirstPersonCamera&) = delete;
 	void update(float elapsedSeconds);
-	void setFocus(float x, float y, float z);
+	void setPosition(float x, float y, float z);
 	void setLookAngle(float yaw, float pitch);
-	void setArmLength(float armLength);
-	// aspect = width / height
 	void setPerspective(float fovY, float aspect, float nearZ, float farZ);
 };

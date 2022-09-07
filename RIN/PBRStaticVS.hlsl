@@ -45,18 +45,20 @@ StructuredBuffer<StaticObject> staticObjectBuffer : register(t0);
 )]
 PBRInput main(
 	float3 position : POSITION,
-	float3 normal : NORMAL,
-	float3 tangent : TANGENT,
-	float3 binormal : BINORMAL,
-	float2 tex : TEXCOORD
+	float4 normal : NORMAL, // float4(normal.xyz, tex.x)
+	float4 tangent : TANGENT // float4(tangent.xyz, tex.y)
 ) {
+	StaticObject object = staticObjectBuffer[rootConstants.objectID];
+
 	PBRInput output;
 	output.position = mul(cameraBuffer.viewProjMatrix, float4(position, 1.0f));
 	output.clipPos = output.position;
 	output.worldPos = position;
-	output.tbn = float3x3(tangent, binormal, normal); // This is a row-major row vector matrix (x * A)
-	output.tex = tex;
-	output.material = staticObjectBuffer[rootConstants.objectID].material;
+	output.tbn = float3x3(tangent.xyz, cross(normal.xyz, tangent.xyz), normal.xyz); // This is a row-major row vector matrix (x * A)
+	output.tex.x = normal.w;
+	output.tex.y = tangent.w;
+	output.material = object.material;
+	output.flags = object.flags;
 
 	return output;
 }

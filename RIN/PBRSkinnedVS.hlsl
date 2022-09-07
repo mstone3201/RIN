@@ -8,7 +8,8 @@ struct RootConstants {
 
 ConstantBuffer<RootConstants> rootConstants : register(b0);
 ConstantBuffer<Camera> cameraBuffer : register(b1);
-StructuredBuffer<DynamicObject> dynamicObjectBuffer : register(t0);
+StructuredBuffer<SkinnedObject> skinnedObjectBuffer : register(t0);
+StructuredBuffer<Bone> boneBuffer : register(t1);
 
 [RootSignature(
 	"RootFlags("\
@@ -21,6 +22,7 @@ StructuredBuffer<DynamicObject> dynamicObjectBuffer : register(t0);
 	"RootConstants(num32BitConstants = 4, b0, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"CBV(b1),"\
 	"SRV(t0, visibility = SHADER_VISIBILITY_VERTEX),"\
+	"SRV(t1, visibility = SHADER_VISIBILITY_VERTEX),"\
 	"SRV(t0, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"SRV(t1, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"DescriptorTable("\
@@ -46,19 +48,38 @@ StructuredBuffer<DynamicObject> dynamicObjectBuffer : register(t0);
 PBRInput main(
 	float3 position : POSITION,
 	float4 normal : NORMAL, // float4(normal.xyz, tex.x)
-	float4 tangent : TANGENT // float4(tangent.xyz, tex.y)
+	float4 tangent : TANGENT, // float4(tangent.xyz, tex.y)
+	uint4 boneIndices : BLENDINDICES,
+	float4 boneWeights : BLENDWEIGHTS
 ) {
 	PBRInput output;
-	
-	DynamicObject object = dynamicObjectBuffer[rootConstants.objectID];
 
-	float4 worldPos = mul(object.worldMatrix, float4(position, 1.0f));
+	SkinnedObject object = skinnedObjectBuffer[rootConstants.objectID];
+
+	Bone bones[4] = {
+		boneBuffer[object.boneIndex + boneIndices.x],
+		boneBuffer[object.boneIndex + boneIndices.y],
+		boneBuffer[object.boneIndex + boneIndices.z],
+		boneBuffer[object.boneIndex + boneIndices.w]
+	};
+
+	float4x4 worldMatrix = boneWeights.x * bones[0].worldMatrix +
+		boneWeights.y * bones[1].worldMatrix +
+		boneWeights.z * bones[2].worldMatrix +
+		boneWeights.w * bones[3].worldMatrix;
+
+	float4x4 invWorldMatrix = boneWeights.x * bones[0].invWorldMatrix +
+		boneWeights.y * bones[1].invWorldMatrix +
+		boneWeights.z * bones[2].invWorldMatrix +
+		boneWeights.w * bones[3].invWorldMatrix;
+
+	float4 worldPos = mul(worldMatrix, float4(position, 1.0f));
 	output.position = mul(cameraBuffer.viewProjMatrix, worldPos);
 	output.clipPos = output.position;
 	output.worldPos = worldPos.xyz;
-	float3 T = normalize(mul((float3x3)object.worldMatrix, tangent.xyz));
+	float3 T = normalize(mul((float3x3)worldMatrix, tangent.xyz));
 	// normalMatrix * x = (worldMatrix^-1)^T * x = x * worldMatrix^-1
-	float3 N = normalize(mul(normal.xyz, (float3x3)object.invWorldMatrix));
+	float3 N = normalize(mul(normal.xyz, (float3x3)invWorldMatrix));
 	output.tbn = float3x3(T, cross(N, T), N); // This is a row-major row vector matrix (x * A)
 	output.tex.x = normal.w;
 	output.tex.y = tangent.w;

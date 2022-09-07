@@ -10,9 +10,11 @@
 #include "shaders/DepthMIPCS.h"
 #include "shaders/CullStaticCS.h"
 #include "shaders/CullDynamicCS.h"
+#include "shaders/CullSkinnedCS.h"
 #include "shaders/LightClusterCS.h"
 #include "shaders/PBRStaticVS.h"
 #include "shaders/PBRDynamicVS.h"
+#include "shaders/PBRSkinnedVS.h"
 #include "shaders/PBRPS.h"
 #include "shaders/SkyboxVS.h"
 #include "shaders/SkyboxPS.h"
@@ -30,21 +32,23 @@ constexpr DXGI_FORMAT DEPTH_FORMAT_SRV = DXGI_FORMAT_R32_FLOAT;
 constexpr DXGI_FORMAT INDEX_FORMAT = DXGI_FORMAT_R32_UINT;
 
 // (Sync) For copying camera data, static and dynamic object data, and light data
-constexpr uint32_t COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX = 0;
-// (Async) For copying static vertices and dynamic indices
-constexpr uint32_t COPY_QUEUE_STATIC_VB_DYNAMIC_IB_INDEX = 1;
-// (Async) For copying dynamic vertices and static indices
-constexpr uint32_t COPY_QUEUE_DYNAMIC_VB_STATIC_IB_INDEX = 2;
+constexpr uint32_t COPY_QUEUE_CAMERA_STATIC_DYNAMIC_SKINNED_OB_LB_INDEX = 0;
+// (Async) For copying static vertices and dynamic and skinned indices
+constexpr uint32_t COPY_QUEUE_STATIC_VB_DYNAMIC_SKINNED_IB_INDEX = 1;
+// (Async) For copying dynamic and skinned vertices and static indices
+constexpr uint32_t COPY_QUEUE_DYNAMIC_SKINNED_VB_STATIC_IB_INDEX = 2;
 // (Async) For copying textures
 constexpr uint32_t COPY_QUEUE_TEXTURE_INDEX = 3;
 
 constexpr uint32_t CULL_THREAD_GROUP_SIZE = 128;
 constexpr uint32_t SCENE_STATIC_COMMAND_SIZE = sizeof(uint32_t) + sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
 constexpr uint32_t SCENE_DYNAMIC_COMMAND_SIZE = sizeof(uint32_t) + sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
+constexpr uint32_t SCENE_SKINNED_COMMAND_SIZE = sizeof(uint32_t) + sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
 constexpr uint32_t UAV_COUNTER_SIZE = sizeof(uint32_t);
 
 static_assert(SCENE_STATIC_COMMAND_SIZE >= UAV_COUNTER_SIZE, "SCENE_STATIC_COMMAND_SIZE cannot be less than UAV_COUNTER_SIZE");
 static_assert(SCENE_DYNAMIC_COMMAND_SIZE >= UAV_COUNTER_SIZE, "SCENE_DYNAMIC_COMMAND_SIZE cannot be less than UAV_COUNTER_SIZE");
+static_assert(SCENE_SKINNED_COMMAND_SIZE >= UAV_COUNTER_SIZE, "SCENE_SKINNED_COMMAND_SIZE cannot be less than UAV_COUNTER_SIZE");
 
 constexpr uint32_t DEPTH_MIP_THREAD_GROUP_SIZE_X = 32;
 constexpr uint32_t DEPTH_MIP_THREAD_GROUP_SIZE_Y = 32;
@@ -68,8 +72,9 @@ static_assert(SCENE_FRUSTUM_CLUSTER_DEPTH % LIGHT_CLUSTER_THREAD_GROUP_SIZE_Z ==
 19-34: (UAV) sceneDepthHierarchy MIP
 35: (UAV) sceneStaticCommandBuffer
 36: (UAV) sceneDynamicCommandBuffer
-37: (UAV) sceneLightClusterBuffer
-38-unbounded: (SRV) sceneTexture
+37: (UAV) sceneSkinnedCommandBuffer
+38: (UAV) sceneLightClusterBuffer
+39-unbounded: (SRV) sceneTexture
 */
 constexpr uint32_t SCENE_BACK_BUFFER_SRV_OFFSET = 0;
 constexpr uint32_t SCENE_DEPTH_BUFFER_SRV_OFFSET = 1;
@@ -78,14 +83,16 @@ constexpr uint32_t SCENE_DEPTH_HIERARCHY_MIP_SRV_OFFSET = 3;
 constexpr uint32_t SCENE_DEPTH_HIERARCHY_MIP_UAV_OFFSET = 19;
 constexpr uint32_t SCENE_STATIC_COMMAND_BUFFER_UAV_OFFSET = 35;
 constexpr uint32_t SCENE_DYNAMIC_COMMAND_BUFFER_UAV_OFFSET = 36;
-constexpr uint32_t SCENE_LIGHT_CLUSTER_BUFFER_UAV_OFFSET = 37;
-constexpr uint32_t SCENE_DESC_CONST_COUNT = 38;
-constexpr uint32_t SCENE_TEXTURE_SRV_OFFSET = 38;
+constexpr uint32_t SCENE_SKINNED_COMMAND_BUFFER_UAV_OFFSET = 37;
+constexpr uint32_t SCENE_LIGHT_CLUSTER_BUFFER_UAV_OFFSET = 38;
+constexpr uint32_t SCENE_DESC_CONST_COUNT = 39;
+constexpr uint32_t SCENE_TEXTURE_SRV_OFFSET = 39;
 
 #ifdef RIN_DEBUG
 constexpr uint32_t DEBUG_QUERY_PIPELINE_STATIC_RENDER = 0;
 constexpr uint32_t DEBUG_QUERY_PIPELINE_DYNAMIC_RENDER = 1;
-constexpr uint32_t DEBUG_QUERY_PIPELINE_COUNT = 2;
+constexpr uint32_t DEBUG_QUERY_PIPELINE_SKINNED_RENDER = 2;
+constexpr uint32_t DEBUG_QUERY_PIPELINE_COUNT = 3;
 #endif
 
 namespace RIN {
@@ -98,14 +105,21 @@ namespace RIN {
 		sceneStaticIndexAllocator(config.staticIndexCount * sizeof(index_type)),
 		sceneDynamicVertexAllocator(config.dynamicVertexCount * sizeof(DynamicVertex)),
 		sceneDynamicIndexAllocator(config.dynamicIndexCount * sizeof(index_type)),
+		sceneSkinnedVertexAllocator(config.skinnedVertexCount * sizeof(SkinnedVertex)),
+		sceneSkinnedIndexAllocator(config.skinnedIndexCount * sizeof(index_type)),
+		sceneBoneAllocator(config.boneCount),
 		sceneTextureAllocator(ALIGN_TO(config.texturesSize, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT)),
 		sceneStaticMeshPool(config.staticMeshCount),
 		sceneStaticObjectPool(config.staticObjectCount),
 		sceneDynamicMeshPool(config.dynamicMeshCount),
 		sceneDynamicObjectPool(config.dynamicObjectCount),
+		sceneSkinnedMeshPool(config.skinnedMeshCount),
+		sceneSkinnedObjectPool(config.skinnedObjectCount),
+		sceneArmaturePool(config.armatureCount),
 		sceneTexturePool(config.textureCount),
 		sceneMaterialPool(config.materialCount),
-		sceneLightPool(config.lightCount)
+		sceneLightPool(config.lightCount),
+		sceneBones(new Bone[config.boneCount]{})
 	{
 		// Make sure that every call which can fail calls destroy()
 		// before throwing an error
@@ -113,16 +127,21 @@ namespace RIN {
 		// resources it allocated are deallocated by the time control
 		// is handed back to the caller
 
+		// VBV and IBV structs SizeInBytes member is a UINT
 		if(sceneStaticVertexAllocator.getSize() > UINT_MAX) RIN_ERROR("Scene static vertex buffer size exceeded UINT_MAX");
 		if(sceneDynamicVertexAllocator.getSize() > UINT_MAX) RIN_ERROR("Scene dynamic vertex buffer size exceeded UINT_MAX");
+		if(sceneSkinnedVertexAllocator.getSize() > UINT_MAX) RIN_ERROR("Scene skinned vertex buffer size exceeded UINT_MAX");
 		if(sceneStaticIndexAllocator.getSize() > UINT_MAX) RIN_ERROR("Scene static index buffer size exceeded UINT_MAX");
 		if(sceneDynamicIndexAllocator.getSize() > UINT_MAX) RIN_ERROR("Scene dynamic index buffer size exceeded UINT_MAX");
+		if(sceneSkinnedIndexAllocator.getSize() > UINT_MAX) RIN_ERROR("Scene skinned index buffer size exceeded UINT_MAX");
 
 		// DRAW_INDEXED_ARGUMENTS has an int32 index offset, so we can't allow the full uint32 range
 		if(config.staticVertexCount > INT32_MAX) RIN_ERROR("Maximum allowable static vertex count is INT32_MAX");
 		if(config.dynamicVertexCount > INT32_MAX) RIN_ERROR("Maximum allowable dynamic vertex count is INT32_MAX");
+		if(config.skinnedVertexCount > INT32_MAX) RIN_ERROR("Maximum allowable skinned vertex count is INT32_MAX");
 		if(config.staticObjectCount % CULL_THREAD_GROUP_SIZE) RIN_ERROR("Static object count must be a multiple of 128");
 		if(config.dynamicObjectCount % CULL_THREAD_GROUP_SIZE) RIN_ERROR("Dynamic object count must be a multiple of 128");
+		if(config.skinnedObjectCount % CULL_THREAD_GROUP_SIZE) RIN_ERROR("Skinned object count must be a multiple of 128");
 
 		if(settings.backBufferCount < 2) RIN_ERROR("Back buffer count must be at least 2");
 
@@ -373,7 +392,10 @@ namespace RIN {
 		uploadDynamicObjectOffset = uploadCameraOffset + uploadCameraSize;
 		const uint64_t uploadDynamicObjectSize = config.dynamicObjectCount * sizeof(D3D12DynamicObjectData);
 
-		uploadLightOffset = uploadDynamicObjectOffset + uploadDynamicObjectSize;
+		uploadBoneOffset = uploadDynamicObjectOffset + uploadDynamicObjectSize;
+		const uint64_t uploadBoneSize = config.boneCount * sizeof(D3D12BoneData);
+
+		uploadLightOffset = uploadBoneOffset + uploadBoneSize;
 		const uint64_t uploadLightSize = config.lightCount * sizeof(D3D12LightData);
 		
 		uploadStreamOffset = uploadLightOffset + uploadLightSize;
@@ -607,6 +629,21 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to create dynamic culling pipeline state");
 		RIN_DEBUG_NAME(cullDynamicPipelineState, "Cull Dynamic Pipeline State");
 
+		// Create skinned culling root signature
+		// Located in CullSkinnedCS.hlsl
+		result = device->CreateRootSignature(0, RINShaderBytesCullSkinnedCS, sizeof(RINShaderBytesCullSkinnedCS), IID_PPV_ARGS(&cullSkinnedRootSignature));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned culling root signature");
+		RIN_DEBUG_NAME(cullSkinnedRootSignature, "Cull Skinned Root Signature");
+
+		// Create skinned culling pipeline state
+		computePipelineStateDesc.pRootSignature = cullSkinnedRootSignature;
+		computePipelineStateDesc.CS.pShaderBytecode = RINShaderBytesCullSkinnedCS;
+		computePipelineStateDesc.CS.BytecodeLength = sizeof(RINShaderBytesCullSkinnedCS);
+
+		result = device->CreateComputePipelineState(&computePipelineStateDesc, IID_PPV_ARGS(&cullSkinnedPipelineState));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned culling pipeline state");
+		RIN_DEBUG_NAME(cullSkinnedPipelineState, "Cull Skinned Pipeline State");
+
 		// Create static culling command allocator
 		result = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&cullStaticCommandAllocator));
 		if(FAILED(result)) RIN_ERROR("Failed to create static culling command allocator");
@@ -626,6 +663,16 @@ namespace RIN {
 		result = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&cullDynamicCommandList));
 		if(FAILED(result)) RIN_ERROR("Failed to create dynamic culling command list");
 		RIN_DEBUG_NAME(cullDynamicCommandList, "Cull Dynamic Command List");
+
+		// Create skinned culling command allocator
+		result = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&cullSkinnedCommandAllocator));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned culling command allocator");
+		RIN_DEBUG_NAME(cullSkinnedCommandAllocator, "Cull Skinned Command Allocator");
+
+		// Create closed skinned culling command list
+		result = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&cullSkinnedCommandList));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned culling command list");
+		RIN_DEBUG_NAME(cullSkinnedCommandList, "Cull Skinned Command List");
 
 		// Light clustering
 		
@@ -707,7 +754,7 @@ namespace RIN {
 		RIN_DEBUG_NAME(sceneStaticCommandSignature, "Scene Static Command Signature");
 
 		// Create static pbr scene rendering pipeline state
-		D3D12_INPUT_ELEMENT_DESC staticPBRInputElementDescs[5]{};
+		D3D12_INPUT_ELEMENT_DESC staticPBRInputElementDescs[3]{};
 		staticPBRInputElementDescs[0].SemanticName = "POSITION";
 		staticPBRInputElementDescs[0].SemanticIndex = 0;
 		staticPBRInputElementDescs[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
@@ -717,32 +764,18 @@ namespace RIN {
 		staticPBRInputElementDescs[0].InstanceDataStepRate = 0;
 		staticPBRInputElementDescs[1].SemanticName = "NORMAL";
 		staticPBRInputElementDescs[1].SemanticIndex = 0;
-		staticPBRInputElementDescs[1].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+		staticPBRInputElementDescs[1].Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
 		staticPBRInputElementDescs[1].InputSlot = 0;
 		staticPBRInputElementDescs[1].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
 		staticPBRInputElementDescs[1].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 		staticPBRInputElementDescs[1].InstanceDataStepRate = 0;
 		staticPBRInputElementDescs[2].SemanticName = "TANGENT";
 		staticPBRInputElementDescs[2].SemanticIndex = 0;
-		staticPBRInputElementDescs[2].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+		staticPBRInputElementDescs[2].Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
 		staticPBRInputElementDescs[2].InputSlot = 0;
 		staticPBRInputElementDescs[2].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
 		staticPBRInputElementDescs[2].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 		staticPBRInputElementDescs[2].InstanceDataStepRate = 0;
-		staticPBRInputElementDescs[3].SemanticName = "BINORMAL";
-		staticPBRInputElementDescs[3].SemanticIndex = 0;
-		staticPBRInputElementDescs[3].Format = DXGI_FORMAT_R32G32B32_FLOAT;
-		staticPBRInputElementDescs[3].InputSlot = 0;
-		staticPBRInputElementDescs[3].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
-		staticPBRInputElementDescs[3].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-		staticPBRInputElementDescs[3].InstanceDataStepRate = 0;
-		staticPBRInputElementDescs[4].SemanticName = "TEXCOORD";
-		staticPBRInputElementDescs[4].SemanticIndex = 0;
-		staticPBRInputElementDescs[4].Format = DXGI_FORMAT_R32G32_FLOAT;
-		staticPBRInputElementDescs[4].InputSlot = 0;
-		staticPBRInputElementDescs[4].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
-		staticPBRInputElementDescs[4].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-		staticPBRInputElementDescs[4].InstanceDataStepRate = 0;
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC scenePipelineStateDesc{};
 		scenePipelineStateDesc.pRootSignature = nullptr;
@@ -827,7 +860,7 @@ namespace RIN {
 		RIN_DEBUG_NAME(sceneDynamicCommandSignature, "Scene Dynamic Command Signature");
 
 		// Create dynamic pbr scene rendering pipeline state
-		D3D12_INPUT_ELEMENT_DESC dynamicPBRInputElementDescs[5]{};
+		D3D12_INPUT_ELEMENT_DESC dynamicPBRInputElementDescs[3]{};
 		dynamicPBRInputElementDescs[0].SemanticName = "POSITION";
 		dynamicPBRInputElementDescs[0].SemanticIndex = 0;
 		dynamicPBRInputElementDescs[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
@@ -837,32 +870,18 @@ namespace RIN {
 		dynamicPBRInputElementDescs[0].InstanceDataStepRate = 0;
 		dynamicPBRInputElementDescs[1].SemanticName = "NORMAL";
 		dynamicPBRInputElementDescs[1].SemanticIndex = 0;
-		dynamicPBRInputElementDescs[1].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+		dynamicPBRInputElementDescs[1].Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
 		dynamicPBRInputElementDescs[1].InputSlot = 0;
 		dynamicPBRInputElementDescs[1].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
 		dynamicPBRInputElementDescs[1].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 		dynamicPBRInputElementDescs[1].InstanceDataStepRate = 0;
 		dynamicPBRInputElementDescs[2].SemanticName = "TANGENT";
 		dynamicPBRInputElementDescs[2].SemanticIndex = 0;
-		dynamicPBRInputElementDescs[2].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+		dynamicPBRInputElementDescs[2].Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
 		dynamicPBRInputElementDescs[2].InputSlot = 0;
 		dynamicPBRInputElementDescs[2].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
 		dynamicPBRInputElementDescs[2].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 		dynamicPBRInputElementDescs[2].InstanceDataStepRate = 0;
-		dynamicPBRInputElementDescs[3].SemanticName = "BINORMAL";
-		dynamicPBRInputElementDescs[3].SemanticIndex = 0;
-		dynamicPBRInputElementDescs[3].Format = DXGI_FORMAT_R32G32B32_FLOAT;
-		dynamicPBRInputElementDescs[3].InputSlot = 0;
-		dynamicPBRInputElementDescs[3].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
-		dynamicPBRInputElementDescs[3].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-		dynamicPBRInputElementDescs[3].InstanceDataStepRate = 0;
-		dynamicPBRInputElementDescs[4].SemanticName = "TEXCOORD";
-		dynamicPBRInputElementDescs[4].SemanticIndex = 0;
-		dynamicPBRInputElementDescs[4].Format = DXGI_FORMAT_R32G32_FLOAT;
-		dynamicPBRInputElementDescs[4].InputSlot = 0;
-		dynamicPBRInputElementDescs[4].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
-		dynamicPBRInputElementDescs[4].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-		dynamicPBRInputElementDescs[4].InstanceDataStepRate = 0;
 
 		scenePipelineStateDesc.VS.pShaderBytecode = RINShaderBytesPBRDynamicVS;
 		scenePipelineStateDesc.VS.BytecodeLength = sizeof(RINShaderBytesPBRDynamicVS);
@@ -874,6 +893,78 @@ namespace RIN {
 		result = device->CreateGraphicsPipelineState(&scenePipelineStateDesc, IID_PPV_ARGS(&sceneDynamicPBRPipelineState));
 		if(FAILED(result)) RIN_ERROR("Failed to create dynamic pbr scene rendering pipeline state");
 		RIN_DEBUG_NAME(sceneDynamicPBRPipelineState, "Scene Dynamic PBR Pipeline State");
+
+		// Create skinned scene rendering root signature
+		// Located in PBRSkinnedVS.hlsl
+		result = device->CreateRootSignature(0, RINShaderBytesPBRSkinnedVS, sizeof(RINShaderBytesPBRSkinnedVS), IID_PPV_ARGS(&sceneSkinnedRootSignature));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned scene rendering root signature");
+		RIN_DEBUG_NAME(sceneSkinnedRootSignature, "Scene Skinned Root Signature");
+
+		// Create skinned scene rendering command signature
+		D3D12_INDIRECT_ARGUMENT_DESC sceneSkinnedIndirectArguments[2]{};
+		sceneSkinnedIndirectArguments[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+		sceneSkinnedIndirectArguments[0].Constant.RootParameterIndex = 0;
+		sceneSkinnedIndirectArguments[0].Constant.DestOffsetIn32BitValues = 0;
+		sceneSkinnedIndirectArguments[0].Constant.Num32BitValuesToSet = 1;
+		sceneSkinnedIndirectArguments[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+
+		commandSignature.ByteStride = SCENE_SKINNED_COMMAND_SIZE;
+		commandSignature.NumArgumentDescs = _countof(sceneSkinnedIndirectArguments);
+		commandSignature.pArgumentDescs = sceneSkinnedIndirectArguments;
+		commandSignature.NodeMask = 0;
+
+		result = device->CreateCommandSignature(&commandSignature, sceneSkinnedRootSignature, IID_PPV_ARGS(&sceneSkinnedCommandSignature));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned scene rendering command signature");
+		RIN_DEBUG_NAME(sceneSkinnedCommandSignature, "Scene Skinned Command Signature");
+
+		// Create skinned pbr scene rendering pipeline state
+		D3D12_INPUT_ELEMENT_DESC skinnedPBRInputElementDescs[5]{};
+		skinnedPBRInputElementDescs[0].SemanticName = "POSITION";
+		skinnedPBRInputElementDescs[0].SemanticIndex = 0;
+		skinnedPBRInputElementDescs[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+		skinnedPBRInputElementDescs[0].InputSlot = 0;
+		skinnedPBRInputElementDescs[0].AlignedByteOffset = 0;
+		skinnedPBRInputElementDescs[0].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+		skinnedPBRInputElementDescs[0].InstanceDataStepRate = 0;
+		skinnedPBRInputElementDescs[1].SemanticName = "NORMAL";
+		skinnedPBRInputElementDescs[1].SemanticIndex = 0;
+		skinnedPBRInputElementDescs[1].Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		skinnedPBRInputElementDescs[1].InputSlot = 0;
+		skinnedPBRInputElementDescs[1].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
+		skinnedPBRInputElementDescs[1].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+		skinnedPBRInputElementDescs[1].InstanceDataStepRate = 0;
+		skinnedPBRInputElementDescs[2].SemanticName = "TANGENT";
+		skinnedPBRInputElementDescs[2].SemanticIndex = 0;
+		skinnedPBRInputElementDescs[2].Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		skinnedPBRInputElementDescs[2].InputSlot = 0;
+		skinnedPBRInputElementDescs[2].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
+		skinnedPBRInputElementDescs[2].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+		skinnedPBRInputElementDescs[2].InstanceDataStepRate = 0;
+		skinnedPBRInputElementDescs[3].SemanticName = "BLENDINDICES";
+		skinnedPBRInputElementDescs[3].SemanticIndex = 0;
+		skinnedPBRInputElementDescs[3].Format = DXGI_FORMAT_R8G8B8A8_UINT;
+		skinnedPBRInputElementDescs[3].InputSlot = 0;
+		skinnedPBRInputElementDescs[3].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
+		skinnedPBRInputElementDescs[3].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+		skinnedPBRInputElementDescs[3].InstanceDataStepRate = 0;
+		skinnedPBRInputElementDescs[4].SemanticName = "BLENDWEIGHTS";
+		skinnedPBRInputElementDescs[4].SemanticIndex = 0;
+		skinnedPBRInputElementDescs[4].Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		skinnedPBRInputElementDescs[4].InputSlot = 0;
+		skinnedPBRInputElementDescs[4].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
+		skinnedPBRInputElementDescs[4].InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+		skinnedPBRInputElementDescs[4].InstanceDataStepRate = 0;
+
+		scenePipelineStateDesc.VS.pShaderBytecode = RINShaderBytesPBRSkinnedVS;
+		scenePipelineStateDesc.VS.BytecodeLength = sizeof(RINShaderBytesPBRSkinnedVS);
+		scenePipelineStateDesc.PS.pShaderBytecode = RINShaderBytesPBRPS;
+		scenePipelineStateDesc.PS.BytecodeLength = sizeof(RINShaderBytesPBRPS);
+		scenePipelineStateDesc.InputLayout.pInputElementDescs = skinnedPBRInputElementDescs;
+		scenePipelineStateDesc.InputLayout.NumElements = _countof(skinnedPBRInputElementDescs);
+
+		result = device->CreateGraphicsPipelineState(&scenePipelineStateDesc, IID_PPV_ARGS(&sceneSkinnedPBRPipelineState));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned pbr scene rendering pipeline state");
+		RIN_DEBUG_NAME(sceneSkinnedPBRPipelineState, "Scene Skinned PBR Pipeline State");
 
 		// Create static scene rendering command allocator
 		result = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&sceneStaticCommandAllocator));
@@ -894,6 +985,16 @@ namespace RIN {
 		result = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&sceneDynamicCommandList));
 		if(FAILED(result)) RIN_ERROR("Failed to create dynamic scene rendering command list");
 		RIN_DEBUG_NAME(sceneDynamicCommandList, "Scene Dynamic Command List");
+
+		// Create skinned scene rendering command allocator
+		result = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&sceneSkinnedCommandAllocator));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned scene rendering command allocator");
+		RIN_DEBUG_NAME(sceneSkinnedCommandAllocator, "Scene Skinned Command Allocator");
+
+		// Create closed skinned scene rendering command list
+		result = device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&sceneSkinnedCommandList));
+		if(FAILED(result)) RIN_ERROR("Failed to create skinned scene rendering command list");
+		RIN_DEBUG_NAME(sceneSkinnedCommandList, "Scene Skinned Command List");
 
 		// Skybox
 
@@ -1091,10 +1192,14 @@ namespace RIN {
 		const uint64_t dynamicCommandBufferOffset = staticCommandBufferOffset + staticCommandBufferSize;
 		const uint64_t dynamicCommandBufferSize = ALIGN_TO(SCENE_DYNAMIC_COMMAND_SIZE * (config.dynamicObjectCount + 1), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
+		// Counter placed at start of buffer
+		const uint64_t skinnedCommandBufferOffset = dynamicCommandBufferOffset + dynamicCommandBufferSize;
+		const uint64_t skinnedCommandBufferSize = ALIGN_TO(SCENE_SKINNED_COMMAND_SIZE * (config.skinnedObjectCount + 1), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+
 		// Geometry buffer and static vertex buffer share a resource
 		constexpr uint64_t geometryBufferSize = (uint64_t)Geometry::SCREEN_QUAD_SIZE + Geometry::SKYBOX_SIZE;
 
-		const uint64_t staticVertexBufferOffset = dynamicCommandBufferOffset + dynamicCommandBufferSize;
+		const uint64_t staticVertexBufferOffset = skinnedCommandBufferOffset + skinnedCommandBufferSize;
 		const uint64_t staticVertexBufferSize = ALIGN_TO(sceneStaticVertexAllocator.getSize() + geometryBufferSize, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
 		// Geometry is placed at end of static vertex buffer
@@ -1103,19 +1208,31 @@ namespace RIN {
 		const uint64_t dynamicVertexBufferOffset = staticVertexBufferOffset + staticVertexBufferSize;
 		const uint64_t dynamicVertexBufferSize = ALIGN_TO(sceneDynamicVertexAllocator.getSize(), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
-		const uint64_t staticIndexBufferOffset = dynamicVertexBufferOffset + dynamicVertexBufferSize;
+		const uint64_t skinnedVertexBufferOffset = dynamicVertexBufferOffset + dynamicVertexBufferSize;
+		const uint64_t skinnedVertexBufferSize = ALIGN_TO(sceneSkinnedVertexAllocator.getSize(), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+
+		const uint64_t staticIndexBufferOffset = skinnedVertexBufferOffset + skinnedVertexBufferSize;
 		const uint64_t staticIndexBufferSize = ALIGN_TO(sceneStaticIndexAllocator.getSize(), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
 		const uint64_t dynamicIndexBufferOffset = staticIndexBufferOffset + staticIndexBufferSize;
 		const uint64_t dynamicIndexBufferSize = ALIGN_TO(sceneDynamicIndexAllocator.getSize(), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
-		const uint64_t staticObjectBufferOffset = dynamicIndexBufferOffset + dynamicIndexBufferSize;
+		const uint64_t skinnedIndexBufferOffset = dynamicIndexBufferOffset + dynamicIndexBufferSize;
+		const uint64_t skinnedIndexBufferSize = ALIGN_TO(sceneSkinnedIndexAllocator.getSize(), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+
+		const uint64_t staticObjectBufferOffset = skinnedIndexBufferOffset + skinnedIndexBufferSize;
 		const uint64_t staticObjectBufferSize = ALIGN_TO(config.staticObjectCount * sizeof(D3D12StaticObjectData), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
 		const uint64_t dynamicObjectBufferOffset = staticObjectBufferOffset + staticObjectBufferSize;
 		const uint64_t dynamicObjectBufferSize = ALIGN_TO(config.dynamicObjectCount * sizeof(D3D12DynamicObjectData), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
-		const uint64_t lightBufferOffset = dynamicObjectBufferOffset + dynamicObjectBufferSize;
+		const uint64_t skinnedObjectBufferOffset = dynamicObjectBufferOffset + dynamicObjectBufferSize;
+		const uint64_t skinnedObjectBufferSize = ALIGN_TO(config.skinnedObjectCount * sizeof(D3D12SkinnedObjectData), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+
+		const uint64_t boneBufferOffset = skinnedObjectBufferOffset + skinnedObjectBufferSize;
+		const uint64_t boneBufferSize = ALIGN_TO(config.boneCount * sizeof(D3D12BoneData), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+
+		const uint64_t lightBufferOffset = boneBufferOffset + boneBufferSize;
 		const uint64_t lightBufferSize = ALIGN_TO(config.lightCount * sizeof(D3D12LightData), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
 		const uint64_t lightClusterBufferOffset = lightBufferOffset + lightBufferSize;
@@ -1207,6 +1324,20 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to create scene dynamic command buffer");
 		RIN_DEBUG_NAME(sceneDynamicCommandBuffer, "Scene Dynamic Command Buffer");
 
+		// Create scene skinned command buffer
+		resourceDesc.Width = skinnedCommandBufferSize;
+
+		result = device->CreatePlacedResource(
+			sceneBufferHeap,
+			skinnedCommandBufferOffset,
+			&resourceDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneSkinnedCommandBuffer)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene skinned command buffer");
+		RIN_DEBUG_NAME(sceneSkinnedCommandBuffer, "Scene Skinned Command Buffer");
+
 		// Create scene static vertex buffer
 		resourceDesc.Width = staticVertexBufferSize;
 		resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
@@ -1236,6 +1367,20 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to create scene dynamic vertex buffer");
 		RIN_DEBUG_NAME(sceneDynamicVertexBuffer, "Scene Dynamic Vertex Buffer");
 
+		// Create scene skinned vertex buffer
+		resourceDesc.Width = skinnedVertexBufferSize;
+
+		result = device->CreatePlacedResource(
+			sceneBufferHeap,
+			skinnedVertexBufferOffset,
+			&resourceDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneSkinnedVertexBuffer)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene skinned vertex buffer");
+		RIN_DEBUG_NAME(sceneSkinnedVertexBuffer, "Scene Skinned Vertex Buffer");
+
 		// Create scene static index buffer
 		resourceDesc.Width = staticIndexBufferSize;
 
@@ -1264,6 +1409,20 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to create scene dynamic index buffer");
 		RIN_DEBUG_NAME(sceneDynamicIndexBuffer, "Scene Dynamic Index Buffer");
 
+		// Create scene skinned index buffer
+		resourceDesc.Width = skinnedIndexBufferSize;
+
+		result = device->CreatePlacedResource(
+			sceneBufferHeap,
+			skinnedIndexBufferOffset,
+			&resourceDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneSkinnedIndexBuffer)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene skinned index buffer");
+		RIN_DEBUG_NAME(sceneSkinnedIndexBuffer, "Scene Skinned Index Buffer");
+
 		// Create scene static object buffer
 		resourceDesc.Width = staticObjectBufferSize;
 
@@ -1291,6 +1450,34 @@ namespace RIN {
 		);
 		if(FAILED(result)) RIN_ERROR("Faield to create scene dynamic object buffer");
 		RIN_DEBUG_NAME(sceneDynamicObjectBuffer, "Scene Dynamic Object Buffer");
+
+		// Create scene skinned object buffer
+		resourceDesc.Width = skinnedObjectBufferSize;
+
+		result = device->CreatePlacedResource(
+			sceneBufferHeap,
+			skinnedObjectBufferOffset,
+			&resourceDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneSkinnedObjectBuffer)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene skinned object buffer");
+		RIN_DEBUG_NAME(sceneSkinnedObjectBuffer, "Scene Skinned Object Buffer");
+
+		// Create scene bone buffer
+		resourceDesc.Width = boneBufferSize;
+
+		result = device->CreatePlacedResource(
+			sceneBufferHeap,
+			boneBufferOffset,
+			&resourceDesc,
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneBoneBuffer)
+		);
+		if(FAILED(result)) RIN_ERROR("FAILED to create scene bone buffer");
+		RIN_DEBUG_NAME(sceneBoneBuffer, "Scene Bone Buffer");
 
 		// Create scene light buffer
 		resourceDesc.Width = lightBufferSize;
@@ -1355,6 +1542,17 @@ namespace RIN {
 			getSceneDescHeapCPUHandle(SCENE_DYNAMIC_COMMAND_BUFFER_UAV_OFFSET)
 		);
 
+		// Create scene skinned command buffer uav
+		uavDesc.Buffer.NumElements = config.skinnedObjectCount + 1;
+		uavDesc.Buffer.StructureByteStride = SCENE_SKINNED_COMMAND_SIZE;
+
+		device->CreateUnorderedAccessView(
+			sceneSkinnedCommandBuffer,
+			sceneSkinnedCommandBuffer,
+			&uavDesc,
+			getSceneDescHeapCPUHandle(SCENE_SKINNED_COMMAND_BUFFER_UAV_OFFSET)
+		);
+
 		// Create scene light cluster buffer uav
 		uavDesc.Buffer.FirstElement = 0;
 		uavDesc.Buffer.NumElements = SCENE_FRUSTUM_CLUSTER_WIDTH * SCENE_FRUSTUM_CLUSTER_HEIGHT * SCENE_FRUSTUM_CLUSTER_DEPTH;
@@ -1386,6 +1584,11 @@ namespace RIN {
 		sceneDynamicVBV.SizeInBytes = (uint32_t)sceneDynamicVertexAllocator.getSize();
 		sceneDynamicVBV.StrideInBytes = sizeof(DynamicVertex);
 
+		// Create scene skinned vbv
+		sceneSkinnedVBV.BufferLocation = sceneSkinnedVertexBuffer->GetGPUVirtualAddress();
+		sceneSkinnedVBV.SizeInBytes = (uint32_t)sceneSkinnedVertexAllocator.getSize();
+		sceneSkinnedVBV.StrideInBytes = sizeof(SkinnedVertex);
+
 		// Create scene static ibv
 		sceneStaticIBV.BufferLocation = sceneStaticIndexBuffer->GetGPUVirtualAddress();
 		sceneStaticIBV.SizeInBytes = (uint32_t)sceneStaticIndexAllocator.getSize();
@@ -1395,6 +1598,11 @@ namespace RIN {
 		sceneDynamicIBV.BufferLocation = sceneDynamicIndexBuffer->GetGPUVirtualAddress();
 		sceneDynamicIBV.SizeInBytes = (uint32_t)sceneDynamicIndexAllocator.getSize();
 		sceneDynamicIBV.Format = INDEX_FORMAT;
+
+		// Create scene skinned ibv
+		sceneSkinnedIBV.BufferLocation = sceneSkinnedIndexBuffer->GetGPUVirtualAddress();
+		sceneSkinnedIBV.SizeInBytes = (uint32_t)sceneSkinnedIndexAllocator.getSize();
+		sceneSkinnedIBV.Format = INDEX_FORMAT;
 		
 		// Create scene texture heap
 		heapDesc.SizeInBytes = config.texturesSize;
@@ -1436,6 +1644,7 @@ namespace RIN {
 		// Record command lists here to minimize time spent waiting on the GPU
 		threadPool.enqueueJob([this]() { recordCullStaticCommandList(); });
 		threadPool.enqueueJob([this]() { recordCullDynamicCommandList(); });
+		threadPool.enqueueJob([this]() { recordCullSkinnedCommandList(); });
 		threadPool.enqueueJob([this]() { recordLightClusterCommandList(); });
 		recordDepthMIPCommandList();
 		threadPool.wait();
@@ -1486,6 +1695,14 @@ namespace RIN {
 			cullDynamicPipelineState->Release();
 			cullDynamicPipelineState = nullptr;
 		}
+		if(cullSkinnedRootSignature) {
+			cullSkinnedRootSignature->Release();
+			cullSkinnedRootSignature = nullptr;
+		}
+		if(cullSkinnedPipelineState) {
+			cullSkinnedPipelineState->Release();
+			cullSkinnedPipelineState = nullptr;
+		}
 		if(cullStaticCommandAllocator) {
 			cullStaticCommandAllocator->Release();
 			cullStaticCommandAllocator = nullptr;
@@ -1501,6 +1718,14 @@ namespace RIN {
 		if(cullDynamicCommandList) {
 			cullDynamicCommandList->Release();
 			cullDynamicCommandList = nullptr;
+		}
+		if(cullSkinnedCommandAllocator) {
+			cullSkinnedCommandAllocator->Release();
+			cullSkinnedCommandAllocator = nullptr;
+		}
+		if(cullSkinnedCommandList) {
+			cullSkinnedCommandList->Release();
+			cullSkinnedCommandList = nullptr;
 		}
 		if(lightClusterRootSignature) {
 			lightClusterRootSignature->Release();
@@ -1550,6 +1775,18 @@ namespace RIN {
 			sceneDynamicPBRPipelineState->Release();
 			sceneDynamicPBRPipelineState = nullptr;
 		}
+		if(sceneSkinnedRootSignature) {
+			sceneSkinnedRootSignature->Release();
+			sceneSkinnedRootSignature = nullptr;
+		}
+		if(sceneSkinnedCommandSignature) {
+			sceneSkinnedCommandSignature->Release();
+			sceneSkinnedCommandSignature = nullptr;
+		}
+		if(sceneSkinnedPBRPipelineState) {
+			sceneSkinnedPBRPipelineState->Release();
+			sceneSkinnedPBRPipelineState = nullptr;
+		}
 		if(sceneStaticCommandAllocator) {
 			sceneStaticCommandAllocator->Release();
 			sceneStaticCommandAllocator = nullptr;
@@ -1565,6 +1802,14 @@ namespace RIN {
 		if(sceneDynamicCommandList) {
 			sceneDynamicCommandList->Release();
 			sceneDynamicCommandList = nullptr;
+		}
+		if(sceneSkinnedCommandAllocator) {
+			sceneSkinnedCommandAllocator->Release();
+			sceneSkinnedCommandAllocator = nullptr;
+		}
+		if(sceneSkinnedCommandList) {
+			sceneSkinnedCommandList->Release();
+			sceneSkinnedCommandList = nullptr;
 		}
 		if(skyboxRootSignature) {
 			skyboxRootSignature->Release();
@@ -1619,6 +1864,10 @@ namespace RIN {
 			sceneDynamicCommandBuffer->Release();
 			sceneDynamicCommandBuffer = nullptr;
 		}
+		if(sceneSkinnedCommandBuffer) {
+			sceneSkinnedCommandBuffer->Release();
+			sceneSkinnedCommandBuffer = nullptr;
+		}
 		if(sceneStaticVertexBuffer) {
 			sceneStaticVertexBuffer->Release();
 			sceneStaticVertexBuffer = nullptr;
@@ -1626,6 +1875,10 @@ namespace RIN {
 		if(sceneDynamicVertexBuffer) {
 			sceneDynamicVertexBuffer->Release();
 			sceneDynamicVertexBuffer = nullptr;
+		}
+		if(sceneSkinnedVertexBuffer) {
+			sceneSkinnedVertexBuffer->Release();
+			sceneSkinnedVertexBuffer = nullptr;
 		}
 		if(sceneStaticIndexBuffer) {
 			sceneStaticIndexBuffer->Release();
@@ -1635,6 +1888,10 @@ namespace RIN {
 			sceneDynamicIndexBuffer->Release();
 			sceneDynamicIndexBuffer = nullptr;
 		}
+		if(sceneSkinnedIndexBuffer) {
+			sceneSkinnedIndexBuffer->Release();
+			sceneSkinnedIndexBuffer = nullptr;
+		}
 		if(sceneStaticObjectBuffer) {
 			sceneStaticObjectBuffer->Release();
 			sceneStaticObjectBuffer = nullptr;
@@ -1642,6 +1899,14 @@ namespace RIN {
 		if(sceneDynamicObjectBuffer) {
 			sceneDynamicObjectBuffer->Release();
 			sceneDynamicObjectBuffer = nullptr;
+		}
+		if(sceneSkinnedObjectBuffer) {
+			sceneSkinnedObjectBuffer->Release();
+			sceneSkinnedObjectBuffer = nullptr;
+		}
+		if(sceneBoneBuffer) {
+			sceneBoneBuffer->Release();
+			sceneBoneBuffer = nullptr;
 		}
 		if(sceneLightBuffer) {
 			sceneLightBuffer->Release();
@@ -2098,6 +2363,48 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to close dynamic culling command list");
 	}
 
+	void D3D12Renderer::recordCullSkinnedCommandList() {
+		// Reset command allocator to reuse its memory
+		HRESULT result = cullSkinnedCommandAllocator->Reset();
+		if(FAILED(result)) RIN_ERROR("Failed to reset skinned culling command allocator");
+
+		// Put command list back in the recording state
+		result = cullSkinnedCommandList->Reset(cullSkinnedCommandAllocator, cullSkinnedPipelineState);
+		if(FAILED(result)) RIN_ERROR("Failed to reset skinned culling command list");
+
+		// Descriptor binding
+		cullSkinnedCommandList->SetDescriptorHeaps(1, &sceneDescHeap);
+		cullSkinnedCommandList->SetComputeRootSignature(cullSkinnedRootSignature);
+		uint32_t size[2]{ sceneDepthHierarchyWidth, sceneDepthHierarchyHeight };
+		cullSkinnedCommandList->SetComputeRoot32BitConstants(0, 2, size, 0);
+		cullSkinnedCommandList->SetComputeRootShaderResourceView(1, sceneSkinnedObjectBuffer->GetGPUVirtualAddress());
+		cullSkinnedCommandList->SetComputeRootShaderResourceView(2, sceneBoneBuffer->GetGPUVirtualAddress());
+		cullSkinnedCommandList->SetComputeRootDescriptorTable(3, getSceneDescHeapGPUHandle(SCENE_SKINNED_COMMAND_BUFFER_UAV_OFFSET));
+		cullSkinnedCommandList->SetComputeRootConstantBufferView(4, sceneCameraBuffer->GetGPUVirtualAddress());
+		cullSkinnedCommandList->SetComputeRootDescriptorTable(5, getSceneDescHeapGPUHandle(SCENE_DEPTH_HIERARCHY_SRV_OFFSET));
+
+		// Reset uav counter
+		cullSkinnedCommandList->CopyBufferRegion(sceneSkinnedCommandBuffer, 0, sceneZeroBuffer, 0, UAV_COUNTER_SIZE);
+
+		// Transition indirect command buffer to unordered access
+		D3D12_RESOURCE_BARRIER barriers[1]{};
+		barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barriers[0].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		barriers[0].Transition.pResource = sceneSkinnedCommandBuffer;
+		barriers[0].Transition.Subresource = 0;
+		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+
+		cullSkinnedCommandList->ResourceBarrier(_countof(barriers), barriers);
+
+		// Dispatch
+		cullSkinnedCommandList->Dispatch(config.skinnedObjectCount / CULL_THREAD_GROUP_SIZE, 1, 1);
+
+		// Close command list once recording is done
+		result = cullSkinnedCommandList->Close();
+		if(FAILED(result)) RIN_ERROR("Failed to close skinned culling command list");
+	}
+
 	void D3D12Renderer::recordLightClusterCommandList() {
 		// Reset command allocator to reuse its memory
 		HRESULT result = lightClusterCommandAllocator->Reset();
@@ -2274,6 +2581,74 @@ namespace RIN {
 		// Close command list once recording is done
 		result = sceneDynamicCommandList->Close();
 		if(FAILED(result)) RIN_ERROR("Failed to close dynamic scene rendering command list");
+	}
+
+	void D3D12Renderer::recordSceneSkinnedCommandList() {
+		if(!diffuseIBLTexture) RIN_ERROR("Failed to record scene skinned command list because no diffuse IBL texture was set");
+		if(!specularIBLTexture) RIN_ERROR("Failed to record scene skinned command list because no specular IBL texture was set");
+		if(!brdfLUT) RIN_ERROR("Failed to record scene skinned command list because no BRDF LUT was set");
+
+		// Reset command allocator to reuse its memory
+		HRESULT result = sceneSkinnedCommandAllocator->Reset();
+		if(FAILED(result)) RIN_ERROR("Failed to reset skinned scene rendering command allocator");
+
+		// Put command list back in the recording state
+		result = sceneSkinnedCommandList->Reset(sceneSkinnedCommandAllocator, sceneSkinnedPBRPipelineState);
+		if(FAILED(result)) RIN_ERROR("Failed to reset skinned scene rendering command list");
+
+		// Descriptor binding
+		uint32_t iblData[]{
+			sceneTexturePool.getIndex(diffuseIBLTexture),
+			sceneTexturePool.getIndex(specularIBLTexture),
+			specularIBLTexture->resource->GetDesc().MipLevels,
+			sceneTexturePool.getIndex(brdfLUT)
+		};
+
+		sceneSkinnedCommandList->SetDescriptorHeaps(1, &sceneDescHeap);
+		sceneSkinnedCommandList->SetGraphicsRootSignature(sceneSkinnedRootSignature);
+		sceneSkinnedCommandList->SetGraphicsRoot32BitConstants(1, _countof(iblData), iblData, 0);
+		sceneSkinnedCommandList->SetGraphicsRootConstantBufferView(2, sceneCameraBuffer->GetGPUVirtualAddress());
+		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(3, sceneSkinnedObjectBuffer->GetGPUVirtualAddress());
+		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(4, sceneBoneBuffer->GetGPUVirtualAddress());
+		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(5, sceneLightBuffer->GetGPUVirtualAddress());
+		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(6, sceneLightClusterBuffer->GetGPUVirtualAddress());
+		sceneSkinnedCommandList->SetGraphicsRootDescriptorTable(7, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
+
+		// Input-Assembler
+		sceneSkinnedCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		sceneSkinnedCommandList->IASetVertexBuffers(0, 1, &sceneSkinnedVBV);
+		sceneSkinnedCommandList->IASetIndexBuffer(&sceneSkinnedIBV);
+
+		// Raster State
+		sceneSkinnedCommandList->RSSetViewports(1, &sceneBackBufferViewport);
+		sceneSkinnedCommandList->RSSetScissorRects(1, &sceneBackBufferScissorRect);
+
+		// Output Merger
+		D3D12_CPU_DESCRIPTOR_HANDLE rtvDescHandle = sceneRTVDescHeap->GetCPUDescriptorHandleForHeapStart();
+		D3D12_CPU_DESCRIPTOR_HANDLE dsvDescHandle = sceneDSVDescHeap->GetCPUDescriptorHandleForHeapStart();
+		sceneSkinnedCommandList->OMSetRenderTargets(1, &rtvDescHandle, true, &dsvDescHandle);
+
+	#ifdef RIN_DEBUG
+		sceneSkinnedCommandList->BeginQuery(debugQueryPipelineHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, DEBUG_QUERY_PIPELINE_SKINNED_RENDER);
+	#endif
+
+		// Draw
+		sceneSkinnedCommandList->ExecuteIndirect(
+			sceneSkinnedCommandSignature,
+			config.skinnedObjectCount,
+			sceneSkinnedCommandBuffer,
+			SCENE_SKINNED_COMMAND_SIZE,
+			sceneSkinnedCommandBuffer,
+			0
+		);
+
+	#ifdef RIN_DEBUG
+		sceneSkinnedCommandList->EndQuery(debugQueryPipelineHeap, D3D12_QUERY_TYPE_PIPELINE_STATISTICS, DEBUG_QUERY_PIPELINE_SKINNED_RENDER);
+	#endif
+
+		// Close command list once recording is done
+		result = sceneSkinnedCommandList->Close();
+		if(FAILED(result)) RIN_ERROR("Failed to close skinned scene rendering command list");
 	}
 
 	void D3D12Renderer::recordSkyboxCommandList() {
@@ -2685,7 +3060,7 @@ namespace RIN {
 						memcpy(uploadBufferData + uploadStreamOffset + uploadAlloc->start, lodVertices, vertexAlloc.size);
 					},
 					vertexAlloc.size,
-					COPY_QUEUE_STATIC_VB_DYNAMIC_IB_INDEX
+					COPY_QUEUE_STATIC_VB_DYNAMIC_SKINNED_IB_INDEX
 				}
 			);
 
@@ -2710,7 +3085,7 @@ namespace RIN {
 						if(finalUpload) mesh->_resident = true;
 					},
 					indexAlloc.size,
-					COPY_QUEUE_DYNAMIC_VB_STATIC_IB_INDEX
+					COPY_QUEUE_DYNAMIC_SKINNED_VB_STATIC_IB_INDEX
 				}
 			);
 
@@ -2769,7 +3144,7 @@ namespace RIN {
 					);
 				},
 				0,
-					COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX
+					COPY_QUEUE_CAMERA_STATIC_DYNAMIC_SKINNED_OB_LB_INDEX
 				}
 			);
 		}
@@ -2835,7 +3210,7 @@ namespace RIN {
 					object->_resident = true;
 				},
 				sizeof(D3D12StaticObjectData),
-				COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX
+				COPY_QUEUE_CAMERA_STATIC_DYNAMIC_SKINNED_OB_LB_INDEX
 			}
 		);
 	}
@@ -2938,7 +3313,7 @@ namespace RIN {
 						memcpy(uploadBufferData + uploadStreamOffset + uploadAlloc->start, lodVertices, vertexAlloc.size);
 					},
 					vertexAlloc.size,
-					COPY_QUEUE_DYNAMIC_VB_STATIC_IB_INDEX
+					COPY_QUEUE_DYNAMIC_SKINNED_VB_STATIC_IB_INDEX
 				}
 			);
 
@@ -2963,7 +3338,7 @@ namespace RIN {
 						if(finalUpload) mesh->_resident = true;
 					},
 					indexAlloc.size,
-					COPY_QUEUE_STATIC_VB_DYNAMIC_IB_INDEX
+					COPY_QUEUE_STATIC_VB_DYNAMIC_SKINNED_IB_INDEX
 				}
 			);
 
@@ -3008,6 +3383,289 @@ namespace RIN {
 		sceneDynamicObjectPool.remove(object);
 	}
 
+	SkinnedMesh* D3D12Renderer::addSkinnedMesh(
+		const BoundingSphere& boundingSphere,
+		const SkinnedVertex* vertices,
+		const uint32_t* vertexCounts,
+		const index_type* indices,
+		const uint32_t* indexCounts,
+		uint32_t lodCount
+	) {
+		// Validation
+		if(!lodCount) RIN_ERROR("LOD count must not be 0");
+
+		if(lodCount > LOD_COUNT) {
+			RIN_DEBUG_INFO("LOD count larger than supported, ignoring extra LODs");
+			lodCount = LOD_COUNT;
+		}
+
+		for(uint32_t i = 0; i < lodCount; ++i) {
+			if(!vertexCounts[i]) RIN_ERROR("Vertex count must not be 0");
+
+			if(vertexCounts[i] * sizeof(SkinnedVertex) > config.uploadStreamSize) {
+				RIN_DEBUG_ERROR("Skinned vertex upload too large");
+				return nullptr;
+			}
+		}
+
+		for(uint32_t i = 0; i < lodCount; ++i) {
+			if(!indexCounts[i]) RIN_ERROR("Index count must not be 0");
+
+			if(indexCounts[i] * sizeof(index_type) > config.uploadStreamSize) {
+				RIN_DEBUG_ERROR("Skinned index upload too large");
+				return nullptr;
+			}
+		}
+
+		// Create mesh
+		D3D12SkinnedMesh* mesh = sceneSkinnedMeshPool.insert(boundingSphere);
+		if(!mesh) return nullptr;
+
+		// Make all allocations
+		bool failedAlloc = false;
+		for(uint32_t i = 0; i < lodCount; ++i) {
+			auto vertexAlloc = sceneSkinnedVertexAllocator.allocate(vertexCounts[i] * sizeof(SkinnedVertex));
+			if(!vertexAlloc) {
+				failedAlloc = true;
+				break;
+			}
+
+			auto indexAlloc = sceneSkinnedIndexAllocator.allocate(indexCounts[i] * sizeof(index_type));
+			if(!indexAlloc) {
+				failedAlloc = true;
+				sceneSkinnedVertexAllocator.free(vertexAlloc);
+				break;
+			}
+
+			mesh->lods[i].emplace(vertexAlloc.value(), indexAlloc.value());
+		}
+
+		// Cleanup
+		if(failedAlloc) {
+			for(uint32_t i = 0; i < lodCount; ++i) {
+				if(mesh->lods[i]) {
+					sceneSkinnedVertexAllocator.free(mesh->lods[i]->vertexAlloc);
+					sceneSkinnedIndexAllocator.free(mesh->lods[i]->indexAlloc);
+				}
+			}
+
+			sceneSkinnedMeshPool.remove(mesh);
+
+			return nullptr;
+		}
+
+		// Critical section
+		std::lock_guard<std::mutex> lock(uploadStreamMutex);
+
+		const SkinnedVertex* lodVertices = vertices;
+		const index_type* lodIndices = indices;
+		for(uint32_t i = 0; i < lodCount; ++i) {
+			FreeListAllocator::Allocation vertexAlloc = mesh->lods[i]->vertexAlloc;
+			FreeListAllocator::Allocation indexAlloc = mesh->lods[i]->indexAlloc;
+
+			// Enqueue vertex upload
+			uploadStreamQueue.push(
+				{
+					[this, vertexAlloc, lodVertices](ID3D12GraphicsCommandList* commandList) {
+						auto uploadAlloc = uploadStreamAllocator.allocate(vertexAlloc.size);
+						if(!uploadAlloc) RIN_ERROR("Upload skinned vertices anomaly: out of upload stream space");
+
+						commandList->CopyBufferRegion(
+							sceneSkinnedVertexBuffer,
+							vertexAlloc.start,
+							uploadBuffer,
+							uploadStreamOffset + uploadAlloc->start,
+							vertexAlloc.size
+						);
+
+						memcpy(uploadBufferData + uploadStreamOffset + uploadAlloc->start, lodVertices, vertexAlloc.size);
+					},
+					vertexAlloc.size,
+					COPY_QUEUE_DYNAMIC_SKINNED_VB_STATIC_IB_INDEX
+				}
+			);
+
+			// Enqueue index upload
+			bool finalUpload = i == lodCount - 1;
+			uploadStreamQueue.push(
+				{
+					[this, indexAlloc, lodIndices, finalUpload, mesh](ID3D12GraphicsCommandList* commandList) {
+						auto uploadAlloc = uploadStreamAllocator.allocate(indexAlloc.size);
+						if(!uploadAlloc) RIN_ERROR("Upload skinned indices anomaly: out of upload stream space");
+
+						commandList->CopyBufferRegion(
+							sceneSkinnedIndexBuffer,
+							indexAlloc.start,
+							uploadBuffer,
+							uploadStreamOffset + uploadAlloc->start,
+							indexAlloc.size
+						);
+
+						memcpy(uploadBufferData + uploadStreamOffset + uploadAlloc->start, lodIndices, indexAlloc.size);
+
+						if(finalUpload) mesh->_resident = true;
+					},
+					indexAlloc.size,
+					COPY_QUEUE_STATIC_VB_DYNAMIC_SKINNED_IB_INDEX
+				}
+			);
+
+			lodVertices += vertexCounts[i];
+			lodIndices += indexCounts[i];
+		}
+
+		return mesh;
+	}
+
+	void D3D12Renderer::removeSkinnedMesh(SkinnedMesh* m) {
+		if(!m) return;
+
+		D3D12SkinnedMesh* mesh = (D3D12SkinnedMesh*)m;
+
+		for(uint32_t i = 0; i < LOD_COUNT; ++i) {
+			if(mesh->lods[i]) {
+				sceneSkinnedVertexAllocator.free(mesh->lods[i]->vertexAlloc);
+				sceneSkinnedIndexAllocator.free(mesh->lods[i]->indexAlloc);
+			}
+		}
+
+		// Do this after freeing the allocations so that another thread does
+		// not write over the lods if it gets a pointer that aliases this one
+		sceneSkinnedMeshPool.remove(mesh);
+	}
+
+	SkinnedObject* D3D12Renderer::addSkinnedObject(SkinnedMesh* mesh, Armature* armature, Material* material) {
+		if(!mesh || !armature || !material) return nullptr;
+
+		SkinnedObject* object = sceneSkinnedObjectPool.insert(mesh, armature, material);
+
+		updateSkinnedObject(object);
+
+		return object;
+	}
+
+	void D3D12Renderer::removeSkinnedObject(SkinnedObject* object) {
+		if(!object) return;
+
+		{
+			// Critical section
+			std::lock_guard<std::mutex> lock(uploadStreamMutex);
+
+			// Enqueue object removal
+			uploadStreamQueue.push(
+				{
+					[this, object](ID3D12GraphicsCommandList* commandList) {
+						// Zero the object out
+						commandList->CopyBufferRegion(
+							sceneSkinnedObjectBuffer,
+							sceneSkinnedObjectPool.getIndex(object) * sizeof(D3D12SkinnedObjectData),
+							sceneZeroBuffer,
+							0,
+							sizeof(D3D12SkinnedObjectData)
+						);
+					},
+					0,
+					COPY_QUEUE_CAMERA_STATIC_DYNAMIC_SKINNED_OB_LB_INDEX
+				}
+			);
+		}
+
+		// Need to remove from the pool only after pushing to the queue
+		// so that if any other thread claims the object in the same spot
+		// any updates to its data on the GPU are serialized after the remove
+		sceneSkinnedObjectPool.remove(object);
+	}
+
+	void D3D12Renderer::updateSkinnedObject(SkinnedObject* object) {
+		if(!object) return;
+
+		// Enter critical section
+		std::lock_guard<std::mutex> lock(uploadStreamMutex);
+
+		// Enqueue object upload
+		uploadStreamQueue.push(
+			{
+				[this, object](ID3D12GraphicsCommandList* commandList) {
+					auto uploadAlloc = uploadStreamAllocator.allocate(sizeof(D3D12SkinnedObjectData));
+					if(!uploadAlloc) RIN_ERROR("Upload skinned object anomaly: out of upload stream space");
+
+					commandList->CopyBufferRegion(
+						sceneSkinnedObjectBuffer,
+						sceneSkinnedObjectPool.getIndex(object) * sizeof(D3D12SkinnedObjectData),
+						uploadBuffer,
+						uploadStreamOffset + uploadAlloc->start,
+						sizeof(D3D12SkinnedObjectData)
+					);
+
+					D3D12SkinnedObjectData* objectData = (D3D12SkinnedObjectData*)(uploadBufferData + uploadStreamOffset + uploadAlloc->start);
+
+					// The mesh will always be this derived type
+					D3D12SkinnedMesh* objectMesh = (D3D12SkinnedMesh*)object->mesh;
+
+					objectData->boundingSphere.center = objectMesh->boundingSphere.center;
+					objectData->boundingSphere.radius = objectMesh->boundingSphere.radius;
+
+					// All guaranteed to have at least lod 0
+					D3D12SkinnedMesh::LOD lod = objectMesh->lods[0].value();
+					// Populate LOD data
+					for(uint32_t i = 0; i < LOD_COUNT; ++i) {
+						if(i && objectMesh->lods[i]) lod = objectMesh->lods[i].value();
+
+						objectData->lods[i].startIndex = (uint32_t)(lod.indexAlloc.start / sizeof(index_type));
+						objectData->lods[i].indexCount = (uint32_t)(lod.indexAlloc.size / sizeof(index_type));
+						objectData->lods[i].vertexOffset = (uint32_t)(lod.vertexAlloc.start / sizeof(SkinnedVertex));
+					}
+
+					Material* material = object->material;
+					// The textures will always be this derived type
+					objectData->material.baseColorID = sceneTexturePool.getIndex((D3D12Texture*)material->baseColor);
+					objectData->material.normalID = sceneTexturePool.getIndex((D3D12Texture*)material->normal);
+					objectData->material.roughnessAOID = sceneTexturePool.getIndex((D3D12Texture*)material->roughnessAO);
+					objectData->material.metallicID = sceneTexturePool.getIndex((D3D12Texture*)material->metallic);
+					objectData->material.heightID = sceneTexturePool.getIndex((D3D12Texture*)material->height);
+					if(material->special) objectData->material.specialID = sceneTexturePool.getIndex((D3D12Texture*)material->special);
+
+					// The armature will always be this derived type
+					objectData->boneIndex = (uint32_t)((D3D12Armature*)object->armature)->boneAlloc.start;
+
+					objectData->flags.show = 1;
+					objectData->flags.materialType = (uint32_t)material->type;
+
+					object->_resident = true;
+				},
+				sizeof(D3D12SkinnedObjectData),
+				COPY_QUEUE_CAMERA_STATIC_DYNAMIC_SKINNED_OB_LB_INDEX
+			}
+		);
+	}
+
+	Armature* D3D12Renderer::addArmature(uint8_t boneCount) {
+		auto boneAlloc = sceneBoneAllocator.allocate(boneCount);
+		if(!boneAlloc) return nullptr;
+
+		D3D12Armature* armature = sceneArmaturePool.insert(sceneBones + boneAlloc->start, boneAlloc.value());
+		if(!armature) {
+			sceneBoneAllocator.free(boneAlloc);
+			return nullptr;
+		}
+
+		armature->_resident = true;
+
+		return armature;
+	}
+
+	void D3D12Renderer::removeArmature(Armature* a) {
+		if(!a) return;
+
+		D3D12Armature* armature = (D3D12Armature*)a;
+
+		sceneBoneAllocator.free(armature->boneAlloc);
+
+		// Do this after freeing the allocation so that another thread does
+		// not write over the armature if it gets a pointer that aliases this one
+		sceneArmaturePool.remove(armature);
+	}
+
 	Texture* D3D12Renderer::addTexture(
 		TEXTURE_TYPE type,
 		TEXTURE_FORMAT format,
@@ -3020,7 +3678,11 @@ namespace RIN {
 		if(!width) RIN_ERROR("Texture width cannot be 0");
 		if(!height) RIN_ERROR("Texture height cannot be 0");
 		if(!mipCount) RIN_ERROR("Texture MIP count cannot be 0");
-		mipCount = std::min(mipCount, (uint32_t)std::_Ceiling_of_log_2(std::max(width, height)) + 1);
+		
+		// It seems that _Ceiling_of_log_2(1) returns 1 instead of 0, so this is a workaround
+		uint32_t maxDim = std::max(width, height);
+		if(maxDim == 1) mipCount = 1;
+		else mipCount = std::min(mipCount, (uint32_t)std::_Ceiling_of_log_2(maxDim) + 1);
 
 		uint16_t arraySize = 0;
 		switch(type) {
@@ -3316,6 +3978,18 @@ namespace RIN {
 		}
 	}
 
+	void D3D12Renderer::uploadBoneHelper(uint32_t startIndex, uint32_t endIndex) {
+		D3D12BoneData* dataStart = (D3D12BoneData*)(uploadBufferData + uploadBoneOffset);
+
+		for(uint32_t i = startIndex; i < endIndex; ++i) {
+			Bone* bone = sceneBones + i;
+			D3D12BoneData* boneData = dataStart + i;
+
+			DirectX::XMStoreFloat4x4A(&boneData->worldMatrix, bone->worldMatrix);
+			DirectX::XMStoreFloat4x4A(&boneData->invWorldMatrix, bone->invWorldMatrix);
+		}
+	}
+
 	void D3D12Renderer::uploadLightHelper(uint32_t startIndex, uint32_t endIndex) {
 		D3D12LightData* dataStart = (D3D12LightData*)(uploadBufferData + uploadLightOffset);
 
@@ -3385,6 +4059,15 @@ namespace RIN {
 			config.dynamicObjectCount * sizeof(D3D12DynamicObjectData)
 		);
 
+		// Upload bones
+		uploadUpdateCommandList->CopyBufferRegion(
+			sceneBoneBuffer,
+			0,
+			uploadBuffer,
+			uploadBoneOffset,
+			config.boneCount * sizeof(D3D12BoneData)
+		);
+
 		// Upload lights
 		uploadUpdateCommandList->CopyBufferRegion(
 			sceneLightBuffer,
@@ -3405,6 +4088,14 @@ namespace RIN {
 			dynamicObjectStartIndex = dynamicObjectEndIndex;
 		}
 
+		const uint32_t boneStep = config.boneCount / (spareThreads + 1);
+		uint32_t boneStartIndex = 0;
+		for(uint32_t i = 0; i < spareThreads; ++i) {
+			const uint32_t boneEndIndex = boneStartIndex + boneStep;
+			threadPool.enqueueJob([this, boneStartIndex, boneEndIndex]() { uploadBoneHelper(boneStartIndex, boneEndIndex); });
+			boneStartIndex = boneEndIndex;
+		}
+
 		const uint32_t lightStep = config.lightCount / (spareThreads + 1);
 		uint32_t lightStartIndex = 0;
 		for(uint32_t i = 0; i < spareThreads; ++i) {
@@ -3414,6 +4105,7 @@ namespace RIN {
 		}
 
 		uploadDynamicObjectHelper(dynamicObjectStartIndex, config.dynamicObjectCount);
+		uploadBoneHelper(boneStartIndex, config.boneCount);
 		uploadLightHelper(lightStartIndex, config.lightCount);
 
 		if(spareThreads) threadPool.wait();
@@ -3422,7 +4114,7 @@ namespace RIN {
 		result = uploadUpdateCommandList->Close();
 		if(FAILED(result)) RIN_ERROR("Failed to close upload update command list");
 
-		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX]->ExecuteCommandLists(1, (ID3D12CommandList**)&uploadUpdateCommandList);
+		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_SKINNED_OB_LB_INDEX]->ExecuteCommandLists(1, (ID3D12CommandList**)&uploadUpdateCommandList);
 
 		uploadStreamBarrier.arrive_and_wait(); // Barrier 2
 	}
@@ -3455,6 +4147,7 @@ namespace RIN {
 		if(skyboxDirty) {
 			threadPool.enqueueJob([this]() { recordSceneStaticCommandList(); });
 			threadPool.enqueueJob([this]() { recordSceneDynamicCommandList(); });
+			threadPool.enqueueJob([this]() { recordSceneSkinnedCommandList(); });
 			threadPool.enqueueJob([this]() { recordSkyboxCommandList(); });
 		}
 		recordPostCommandList();
@@ -3465,12 +4158,14 @@ namespace RIN {
 
 		// Read debug query data
 	#ifdef RIN_DEBUG
-		D3D12_QUERY_DATA_PIPELINE_STATISTICS debugStaticRender = *(D3D12_QUERY_DATA_PIPELINE_STATISTICS*)debugQueryData;
-		D3D12_QUERY_DATA_PIPELINE_STATISTICS debugDynamicRender = *((D3D12_QUERY_DATA_PIPELINE_STATISTICS*)debugQueryData + 1);
+		D3D12_QUERY_DATA_PIPELINE_STATISTICS debugStaticRender = ((D3D12_QUERY_DATA_PIPELINE_STATISTICS*)debugQueryData)[DEBUG_QUERY_PIPELINE_STATIC_RENDER];
+		D3D12_QUERY_DATA_PIPELINE_STATISTICS debugDynamicRender = ((D3D12_QUERY_DATA_PIPELINE_STATISTICS*)debugQueryData)[DEBUG_QUERY_PIPELINE_DYNAMIC_RENDER];
+		D3D12_QUERY_DATA_PIPELINE_STATISTICS debugSkinnedRender = ((D3D12_QUERY_DATA_PIPELINE_STATISTICS*)debugQueryData)[DEBUG_QUERY_PIPELINE_SKINNED_RENDER];
 
 		std::wostringstream windowTitle;
 		windowTitle << "Debug Info: " << debugStaticRender.VSInvocations << " Static Vertices " <<
-			debugDynamicRender.VSInvocations << " Dynamic Vertices" << std::endl;
+			debugDynamicRender.VSInvocations << " Dynamic Vertices " <<
+			debugSkinnedRender.VSInvocations << " Skinned Vertices" << std::endl;
 
 		SetWindowText(hwnd, windowTitle.str().c_str());
 	#endif
@@ -3483,7 +4178,7 @@ namespace RIN {
 		computeQueue->ExecuteCommandLists(_countof(computeCommands), computeCommands);
 
 		// Culling
-		ID3D12CommandList* cullCommands[]{ cullStaticCommandList, cullDynamicCommandList };
+		ID3D12CommandList* cullCommands[]{ cullStaticCommandList, cullDynamicCommandList, cullSkinnedCommandList };
 		computeQueue->ExecuteCommandLists(_countof(cullCommands), cullCommands);
 		result = computeQueue->Signal(computeFence, ++computeFenceValue);
 		if(FAILED(result)) RIN_ERROR("Failed to signal compute queue");
@@ -3491,7 +4186,7 @@ namespace RIN {
 		// Scene rendering
 		result = graphicsQueue->Wait(computeFence, computeFenceValue);
 		if(FAILED(result)) RIN_ERROR("Failed to make graphics queue wait on compute queue");
-		ID3D12CommandList* sceneCommands[]{ sceneStaticCommandList, sceneDynamicCommandList, skyboxCommandList };
+		ID3D12CommandList* sceneCommands[]{ sceneStaticCommandList, sceneDynamicCommandList, sceneSkinnedCommandList, skyboxCommandList };
 		graphicsQueue->ExecuteCommandLists(_countof(sceneCommands), sceneCommands);
 			
 		// Post processing
@@ -3511,7 +4206,7 @@ namespace RIN {
 		if(FAILED(result)) RIN_DEBUG_ERROR("Failed to present frame on swap chain");
 
 		// Stall any sync copies until rendering is completed
-		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_OB_LB_INDEX]->Wait(graphicsFence, graphicsFenceValue);
+		copyQueues[COPY_QUEUE_CAMERA_STATIC_DYNAMIC_SKINNED_OB_LB_INDEX]->Wait(graphicsFence, graphicsFenceValue);
 
 		// Frame synchronization
 		result = graphicsQueue->Signal(graphicsFence, graphicsFenceValue);
@@ -3646,8 +4341,10 @@ namespace RIN {
 			// Record the scene rendering commands after the back buffer is recreated
 			threadPool.enqueueJob([this]() { recordCullStaticCommandList(); });
 			threadPool.enqueueJob([this]() { recordCullDynamicCommandList(); });
+			threadPool.enqueueJob([this]() { recordCullSkinnedCommandList(); });
 			threadPool.enqueueJob([this]() { recordSceneStaticCommandList(); });
 			threadPool.enqueueJob([this]() { recordSceneDynamicCommandList(); });
+			threadPool.enqueueJob([this]() { recordSceneSkinnedCommandList(); });
 			threadPool.enqueueJob([this]() { recordSkyboxCommandList(); });
 			recordDepthMIPCommandList();
 			threadPool.wait();

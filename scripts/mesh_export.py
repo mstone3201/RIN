@@ -1,15 +1,23 @@
 # mesh_export.py
-# This script is used to exporting individual meshes
+
+# This script is used for exporting individual meshes
 # Select the type of mesh to export
 MESH_TYPE_STATIC = 0
 MESH_TYPE_DYNAMIC = 1
+MESH_TYPE_SKINNED = 2
 # Set mode to the desired mesh type
-mesh_type = MESH_TYPE_STATIC
+mesh_type = MESH_TYPE_SKINNED
+# Skinned meshes can exceed the bounds of their bounding
+# sphere in certain poses, so a scaling factor should be
+# chosen for each mesh to ensure the bounding sphere
+# completely encloses the mesh under those poses
+# Set the bounding sphere scaling for skinned meshes
+bsphere_scale = 2.0
 # When using MESH_STATIC you may select as many
 # objects as you like and they will be combined into
 # one mesh
-# When using MESH_DYNAMIC only the active object
-# will be exported
+# When using MESH_DYNAMIC or MESH_SKINNED only the
+# active object will be exported
 # Make sure to triangulate the objects before exporting
 # otherwise calc_tangents() will fail
 # The name of the file will be the name of the active object
@@ -32,28 +40,37 @@ path = "../meshes/"
 # If less than 3 LODs are exproted, then RIN will just use the lowest
 # LOD available for the missing LODs
 # If more than 3 LODs are exported, then RIN will just ignore the extras
+# All LODs of a skinned mesh must be parented to the same armature
 lods = [ "LOD 0", "LOD 1", "LOD 2" ]
 
 # Static object input layout
 # POSITION (float3)
-# NORMAL (float3)
-# TANGENT (float3)
-# BINORMAL (float3)
-# TEXCOORD (float2)
-# MATERIAL_ID (uint)
+# NORMAL (half3)
+# TEXCOORD.x (half)
+# TANGENT (half3)
+# TEXCOORD.y (half)
 
 # Dynamic object input layout
 # POSITION (float3)
-# NORMAL (float3)
-# TANGENT (float3)
-# BINORMAL (float3)
-# TEXCOORD (float2)
+# NORMAL (half3)
+# TEXCOORD.x (half)
+# TANGENT (half3)
+# TEXCOORD.y (half)
+
+# Skinned object input layout
+# POSITION (float3)
+# NORMAL (half3)
+# TEXCOORD.x (half)
+# TANGENT (half3)
+# TEXCOORD.y (half)
+# BLENDINDICES ((uint8)4)
+# BLENDWEIGHTS ((uint8)4) - unorm
 
 # File format
 # Object type (uint8)
 # LOD count (uint8)
-# Bounding sphere center (float32[3])
-# Bounding sphere radius (float32)
+# Bounding sphere center (float[3])
+# Bounding sphere radius (float)
 # Vertex counts (uint32 array of LOD count elements)
 # Index counts (uint32 array of LOD count elements)
 # Vertices (struct buffer array of LOD count buffers)
@@ -67,6 +84,7 @@ import math
 C = bpy.context
 D = bpy.data
 
+objects = []
 if mesh_type == MESH_TYPE_STATIC:
     print("Exporting static mesh")
     objects = C.selected_objects
@@ -75,6 +93,24 @@ if mesh_type == MESH_TYPE_STATIC:
 elif mesh_type == MESH_TYPE_DYNAMIC:
     print("Exporting dynamic mesh")
     objects = [C.active_object]
+elif mesh_type == MESH_TYPE_SKINNED:
+    print("Exporting skinned mesh")
+    armature = C.active_object.parent
+    
+    if not armature:
+        print("\"" + C.active_object.name + "\" does not have a parent")
+    elif armature.type != "ARMATURE":
+        print("\"" + armature.name + "\" is not an armature")
+    elif not armature.data.bones:
+        print("\"" + armature.name + "\" does not have any bones")
+    elif len(armature.data.bones) > 256:
+        print("\"" + armature.name + "\" cannot have more than 256 bones")
+    elif armature.data.bones[0].parent:
+        print("\"" + armature.name + "\" does not have the root bone at index 0")
+    else:
+        objects = [C.active_object]
+else:
+    print("Unsupported mesh type")
 
 # Validate objects
 objects_valid = bool(objects)
@@ -118,6 +154,27 @@ for object_index in range(len(objects)):
             lods_valid = False
             break
         
+        if mesh_type == MESH_TYPE_SKINNED:
+            if not lod_object.vertex_groups:
+                print("\"" + lod_object.name + "\" does not have any vertex groups")
+                lods_valid = False
+                break
+            if lod_object.parent != armature:
+                print("\"" + lod_object.name + "\" does not have \"" + armature.name + "\" as its parent")
+                lods_valid = False
+                break
+            vertex_groups_valid = True
+            for vertex_group in lod_object.vertex_groups:
+                if vertex_group.name not in armature.data.bones:
+                    print("\"" + lod_object.name + "\" has a vertex group \"" +
+                        vertex_group.name + "\" which is not a bone in \"" + armature.name + "\"")
+                    vertex_groups_valid = False
+                    break
+            if not vertex_groups_valid:
+                lods_valid = False
+                break
+            
+        
         # Check to see if mesh is triangulated
         triangulated = True
         for face in lod_object.data.polygons:
@@ -139,6 +196,8 @@ for object_index in range(len(objects)):
 # Process objects
 if objects_valid:
     print(str(len(objects)) + " object(s) and " + str(max_lods) + " LOD(s)")
+    if mesh_type == MESH_TYPE_SKINNED:
+        print("Armature: \"" + armature.name + "\", bones: " + str(len(armature.data.bones)))
     
     vertices = [{} for i in range(max_lods)]
     indices = [[] for i in range(max_lods)]
@@ -163,7 +222,7 @@ if objects_valid:
                 mesh.transform(lod.matrix_world)
             
             # Can fail if the mesh is not triangulated
-            mesh.calc_tangents();
+            mesh.calc_tangents()
             
             for face in mesh.polygons:
                 for loop_index in reversed(face.loop_indices): # Use cw winding order
@@ -179,42 +238,59 @@ if objects_valid:
                             bbox_max[i] = vertex.co[i]
                     
                     # Pack data for single vertex
-                    if mesh_type == MESH_TYPE_STATIC:
+                    if mesh_type == MESH_TYPE_STATIC or mesh_type == MESH_TYPE_DYNAMIC:
                         packed_data = struct.pack(
-                            '<ffffffffffffff',
+                            '<fffeeeeeeee',
                             vertex.co.x,
                             vertex.co.y,
                             vertex.co.z,
                             loop.normal.x,
                             loop.normal.y,
                             loop.normal.z,
+                            uv.x,
                             loop.tangent.x,
                             loop.tangent.y,
                             loop.tangent.z,
-                            loop.bitangent.x,
-                            loop.bitangent.y,
-                            loop.bitangent.z,
-                            uv.x,
                             uv.y
                         )
-                    elif mesh_type == MESH_TYPE_DYNAMIC:
+                    elif mesh_type == MESH_TYPE_SKINNED:
+                        vertex_groups = sorted(vertex.groups, key=lambda x: x.weight, reverse=True)[:4]
+                        # Sum of weights may not be 1, so normalize it
+                        weight = 0
+                        for g in vertex_groups:
+                            weight += g.weight
+                            
+                        bone_indices = [0] * 4
+                        bone_weights = [0] * 4
+                        for i in range(len(vertex_groups)):
+                            group_name = lod.vertex_groups[vertex_groups[i].group].name
+                            bone_indices[i] = armature.data.bones.keys().index(group_name)
+                            # Normalize weight and scale to uint8
+                            bone_weights[i] = int(vertex_groups[i].weight / weight * 255)
+                        
                         packed_data = struct.pack(
-                            '<ffffffffffffff',
+                            '<fffeeeeeeeeBBBBBBBB',
                             vertex.co.x,
                             vertex.co.y,
                             vertex.co.z,
                             loop.normal.x,
                             loop.normal.y,
                             loop.normal.z,
+                            uv.x,
                             loop.tangent.x,
                             loop.tangent.y,
                             loop.tangent.z,
-                            loop.bitangent.x,
-                            loop.bitangent.y,
-                            loop.bitangent.z,
-                            uv.x,
-                            uv.y
+                            uv.y,
+                            bone_indices[0],
+                            bone_indices[1],
+                            bone_indices[2],
+                            bone_indices[3],
+                            bone_weights[0],
+                            bone_weights[1],
+                            bone_weights[2],
+                            bone_weights[3]
                         )
+                        
                     
                     # Insert vertex into map if it is unique
                     if packed_data not in vertices[lod_index]:
@@ -259,6 +335,11 @@ if objects_valid:
         extension = ".smesh"
     elif mesh_type == MESH_TYPE_DYNAMIC:
         extension = ".dmesh"
+    elif mesh_type == MESH_TYPE_SKINNED:
+        extension = ".skmesh"
+    
+    if mesh_type == MESH_TYPE_SKINNED:
+        bsphere_radius *= bsphere_scale
     
     file = open(D.filepath[:D.filepath.rfind('\\') + 1] + path + C.active_object.name + extension, 'wb')
     file.write(struct.pack(

@@ -110,6 +110,10 @@ float4 main(PBRInput input) : SV_TARGET {
 
 	// Total contribution from image-based lighting
 	Ir += (Rs + d * Rd) * ao;
+
+	if(getObjectFlagMaterialTypeField(input.flags) == MATERIAL_TYPE_PBR_EMISSIVE)
+		// Emissive contribution
+		Ir += textures[input.material.specialID].Sample(textureSampler, input.tex).xyz;
 	
 	// Final color
 	float3 color = aces_tonemap(Ir);

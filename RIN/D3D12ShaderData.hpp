@@ -49,9 +49,11 @@ namespace RIN {
 		uint32_t data;
 		struct {
 			uint32_t show : 1;
-			uint32_t materialType : 1;
+			uint32_t materialType : 31;
 		};
 	};
+
+	static_assert(sizeof(D3D12ObjectFlagData) == sizeof(uint32_t));
 
 	/*
 	Representation of a static object on the GPU
@@ -77,12 +79,35 @@ namespace RIN {
 		D3D12ObjectFlagData flags;
 	};
 
+	/*
+	Representation of a skinned object on the GPU
+	Aligned to float4
+	*/
+	struct alignas(16) D3D12SkinnedObjectData {
+		D3D12BoundingSphereData boundingSphere;
+		D3D12LODData lods[LOD_COUNT];
+		D3D12MaterialData material;
+		uint32_t boneIndex;
+		D3D12ObjectFlagData flags;
+	};
+
+	/*
+	Representation of a bone on the GPU
+	Aligned to float4
+	*/
+	struct alignas(16) D3D12BoneData {
+		DirectX::XMFLOAT4X4A worldMatrix; // Column-major column vector matrix;
+		DirectX::XMFLOAT4X4A invWorldMatrix; // Column-major column vector matrix;
+	};
+
 	union D3D12LightFlagData {
 		uint32_t data;
 		struct {
 			uint32_t show : 1;
 		};
 	};
+
+	static_assert(sizeof(D3D12LightFlagData) == sizeof(uint32_t));
 
 	/*
 	Representation of a light on the GPU

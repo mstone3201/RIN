@@ -1,24 +1,19 @@
-#include "ThirdPersonCamera.hpp"
+#include "FirstPersonCamera.hpp"
 
 constexpr float maxPitch = DirectX::XM_PIDIV2 - 0.0000001f;
 constexpr float minPitch = -maxPitch;
 constexpr float rotSense = DirectX::XM_PI / 2000.0f;
-constexpr float panSense = 1.0f / 500.0f;
-constexpr float invScrollTime = 1.0f / 0.075f;
-constexpr float scrollEpsilon = 0.00001f;
+constexpr float moveSpeed = 10.0f;
 
-ThirdPersonCamera::ThirdPersonCamera(RIN::Camera& camera, const Input* input) :
+FirstPersonCamera::FirstPersonCamera(RIN::Camera& camera, const Input* input) :
 	camera(camera),
 	input(input)
 {}
 
-void ThirdPersonCamera::update(float elapsedSeconds) {
-	// Rotate and pan
+void FirstPersonCamera::update(float elapsedSeconds) {
+	// Rotate
 	long mdx = input->getMouseDX();
 	long mdy = input->getMouseDY();
-
-	float panX = 0.0f;
-	float panY = 0.0f;
 
 	if(mdx || mdy) {
 		if(input->isKey(KEYBIND::CAMERA_ROTATE)) {
@@ -26,30 +21,46 @@ void ThirdPersonCamera::update(float elapsedSeconds) {
 			pitch = std::min(std::max(pitch + rotSense * mdy, minPitch), maxPitch);
 
 			viewDirty = true;
-		} else if(input->isKey(KEYBIND::CAMERA_PAN)) {
-			panX = panSense * -mdx;
-			panY = panSense * mdy;
-
-			viewDirty = true;
 		}
 	}
 
-	// Zoom
-	float scroll = input->getVerticalScroll();
-	if(scroll != 0.0f) targetArmLength = std::max(targetArmLength - scroll, 0.0f);
+	float moveX = 0.0f;
+	float moveY = 0.0f;
+	float moveZ = 0.0f;
 
-	if(armLength != targetArmLength) {
-		float diff = targetArmLength - armLength;
-		if(fabsf(diff) < scrollEpsilon || elapsedSeconds * invScrollTime >= 1.0f) armLength = targetArmLength;
-		else armLength += diff * elapsedSeconds * invScrollTime;
+	if(input->isKey(KEYBIND::CAMERA_MOVE_RIGHT)) {
+		moveX += moveSpeed * elapsedSeconds;
+
+		viewDirty = true;
+	}
+	if(input->isKey(KEYBIND::CAMERA_MOVE_LEFT)) {
+		moveX -= moveSpeed * elapsedSeconds;
+
+		viewDirty = true;
+	}
+	if(input->isKey(KEYBIND::CAMERA_MOVE_FRONT)) {
+		moveY += moveSpeed * elapsedSeconds;
+
+		viewDirty = true;
+	}
+	if(input->isKey(KEYBIND::CAMERA_MOVE_BACK)) {
+		moveY -= moveSpeed * elapsedSeconds;
+
+		viewDirty = true;
+	}
+	if(input->isKey(KEYBIND::CAMERA_MOVE_UP)) {
+		moveZ += moveSpeed * elapsedSeconds;
+
+		viewDirty = true;
+	}
+	if(input->isKey(KEYBIND::CAMERA_MOVE_DOWN)) {
+		moveZ -= moveSpeed * elapsedSeconds;
 
 		viewDirty = true;
 	}
 
 	// Matrix calculations
 	if(viewDirty) {
-		// Yaw and pitch are from the pov of the focus, so the
-		// vector created points from the focus to the camera
 		float xyLookX = cosf(yaw);
 		float xyLookY = sinf(yaw);
 		float xyLen = cosf(pitch);
@@ -57,14 +68,14 @@ void ThirdPersonCamera::update(float elapsedSeconds) {
 		DirectX::XMVECTOR right{ -xyLookY, xyLookX, 0.0f }; // right = normalize(<0.0, 0.0, 1.0> x negLook)
 		DirectX::XMVECTOR up = DirectX::XMVector3Cross(negLook, right); // up = negLook x right (already normalized)
 
-		// focus += right * panX
-		focus = DirectX::XMVectorMultiplyAdd(right, { panX, panX, panX }, focus);
-		// focus += up * panY;
-		focus = DirectX::XMVectorMultiplyAdd(up, { panY, panY, panY }, focus);
+		// position += right * moveX
+		position = DirectX::XMVectorMultiplyAdd(right, { moveX, moveX, moveX }, position);
+		// position -= negLook * moveY
+		position = DirectX::XMVectorNegativeMultiplySubtract(negLook, { moveY, moveY, moveY }, position);
+		// position.z += moveZ
+		position = DirectX::XMVectorAdd(position, { 0.0f, 0.0f, moveZ });
 
-		// pos = focus + negLook * armLength
-		DirectX::XMVECTOR pos = DirectX::XMVectorMultiplyAdd(negLook, { armLength, armLength, armLength }, focus);
-		DirectX::XMVECTOR negPos = DirectX::XMVectorNegate(pos);
+		DirectX::XMVECTOR negPos = DirectX::XMVectorNegate(position);
 
 		DirectX::XMVECTOR negRightDot = DirectX::XMVector3Dot(right, negPos);
 		DirectX::XMVECTOR negUpDot = DirectX::XMVector3Dot(up, negPos);
@@ -92,26 +103,20 @@ void ThirdPersonCamera::update(float elapsedSeconds) {
 	}
 }
 
-void ThirdPersonCamera::setFocus(float x, float y, float z) {
+void FirstPersonCamera::setPosition(float x, float y, float z) {
 	DirectX::XMFLOAT3A pos(x, y, z);
-	focus = DirectX::XMLoadFloat3A(&pos);
+	position = DirectX::XMLoadFloat3A(&pos);
 
 	viewDirty = true;
 }
 
-void ThirdPersonCamera::setLookAngle(float y, float p) {
+void FirstPersonCamera::setLookAngle(float y, float p) {
 	yaw = y;
 	pitch = p;
 
 	viewDirty = true;
 }
 
-void ThirdPersonCamera::setArmLength(float l) {
-	armLength = targetArmLength = l;
-
-	viewDirty = true;
-}
-
-void ThirdPersonCamera::setPerspective(float fovY, float aspect, float nearZ, float farZ) {
+void FirstPersonCamera::setPerspective(float fovY, float aspect, float nearZ, float farZ) {
 	camera.setPerspective(fovY, aspect, nearZ, farZ);
 }

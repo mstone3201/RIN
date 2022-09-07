@@ -8,10 +8,10 @@ public:
 	class File {
 		friend FilePool;
 
-		uint64_t _size;
-		const char* _data;
+		uint64_t _size = 0;
+		const char* _data = nullptr;
 	public:
-		File();
+		File() = default;
 		File(const File& other);
 		File(File&& other) noexcept;
 		~File();

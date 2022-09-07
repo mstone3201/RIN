@@ -22,6 +22,6 @@ namespace RIN {
 		}
 	};
 
-	// inline allows the definition to reside here even if it included multiple times
+	// inline allows the definition to reside here even if it is included multiple times
 	inline StaticMesh::~StaticMesh() {}
 }

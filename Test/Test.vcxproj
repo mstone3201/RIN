@@ -146,6 +146,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FilePool.cpp" />
+    <ClCompile Include="FirstPersonCamera.cpp" />
     <ClCompile Include="Input.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="SceneGraph.cpp" />
@@ -159,6 +160,7 @@
   <ItemGroup>
     <ClInclude Include="AllocationTest.hpp" />
     <ClInclude Include="FilePool.hpp" />
+    <ClInclude Include="FirstPersonCamera.hpp" />
     <ClInclude Include="Input.hpp" />
     <ClInclude Include="PoolTest.hpp" />
     <ClInclude Include="SceneGraph.hpp" />
