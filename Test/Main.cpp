@@ -159,34 +159,17 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 	// Note that we skip reading the dds file header for simplicity
 
 	// Read environment texture files
-	FilePool::File environmentFiles[4];
-	filePool.readFile("../res/environments/brdf.dds", environmentFiles[0]);
-	filePool.readFile("../res/environments/panorama map/skybox.dds", environmentFiles[1]);
-	filePool.readFile("../res/environments/panorama map/diffuseIBL.dds", environmentFiles[2]);
-	filePool.readFile("../res/environments/panorama map/specularIBL.dds", environmentFiles[3]);
-
-	// Wait for the files to finish reading
-	filePool.wait();
-
-	for(uint32_t i = 0; i < _countof(environmentFiles); ++i) {
-		if(!environmentFiles[i].ready()) {
-			std::cout << "Failed to open environment texture " << i << std::endl;
-			return -1;
-		}
-	}
-
-	// Upload textures
-	RIN::Texture* environmentTextures[4]{};
-	environmentTextures[0] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R16G16_FLOAT, 512, 512, 1, environmentFiles[0].data() + 148);
-	environmentTextures[1] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_CUBE, RIN::TEXTURE_FORMAT::R16B16G16A16_FLOAT, 512, 512, 1, environmentFiles[1].data() + 148);
-	environmentTextures[2] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_CUBE, RIN::TEXTURE_FORMAT::R16B16G16A16_FLOAT, 512, 512, 1, environmentFiles[2].data() + 148);
-	environmentTextures[3] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_CUBE, RIN::TEXTURE_FORMAT::R16B16G16A16_FLOAT, 512, 512, -1, environmentFiles[3].data() + 148);
-
-	renderer->setBRDFLUT(environmentTextures[0]);
-	renderer->setSkybox(environmentTextures[1], environmentTextures[2], environmentTextures[3]);
+	FilePool::File environmentFiles[3];
+	filePool.readFile("../res/environments/panorama map/skybox.dds", environmentFiles[0]);
+	filePool.readFile("../res/environments/panorama map/diffuseIBL.dds", environmentFiles[1]);
+	filePool.readFile("../res/environments/panorama map/specularIBL.dds", environmentFiles[2]);
+	
+	uint32_t environmentMipCounts[]{ 1, 1, (uint32_t)-1 };
+	RIN::Texture* environmentTextures[3]{};
+	bool skyboxSet = false;
 
 	// Read material texture files
-	RIN::TEXTURE_FORMAT textureFormats[]{
+	RIN::TEXTURE_FORMAT textureFormats0[]{
 		RIN::TEXTURE_FORMAT::BC7_UNORM_SRGB,
 		RIN::TEXTURE_FORMAT::BC5_UNORM,
 		RIN::TEXTURE_FORMAT::BC5_UNORM,
@@ -195,7 +178,24 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 		RIN::TEXTURE_FORMAT::BC7_UNORM_SRGB
 	};
 
-	FilePool::File textureFiles[4][6];
+	RIN::TEXTURE_FORMAT textureFormats1[]{
+		RIN::TEXTURE_FORMAT::BC7_UNORM_SRGB,
+		RIN::TEXTURE_FORMAT::BC5_UNORM,
+		RIN::TEXTURE_FORMAT::BC5_UNORM,
+		RIN::TEXTURE_FORMAT::BC4_UNORM,
+		RIN::TEXTURE_FORMAT::BC4_UNORM,
+		RIN::TEXTURE_FORMAT::BC7_UNORM
+	};
+
+	RIN::TEXTURE_FORMAT* textureFormats[]{
+		textureFormats0,
+		textureFormats0,
+		textureFormats0,
+		textureFormats1,
+		textureFormats0,
+	};
+
+	FilePool::File textureFiles[5][6];
 	filePool.readFile("../res/materials/dirt/basecolor.dds", textureFiles[0][0]);
 	filePool.readFile("../res/materials/dirt/normal.dds", textureFiles[0][1]);
 	filePool.readFile("../res/materials/dirt/roughnessao.dds", textureFiles[0][2]);
@@ -214,34 +214,50 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 	filePool.readFile("../res/materials/wood/roughnessao.dds", textureFiles[3][2]);
 	filePool.readFile("../res/materials/wood/metallic.dds", textureFiles[3][3]);
 	filePool.readFile("../res/materials/wood/height.dds", textureFiles[3][4]);
+	filePool.readFile("../res/materials/wood/clearcoat.dds", textureFiles[3][5]);
+	filePool.readFile("../res/materials/blanket/basecolor.dds", textureFiles[4][0]);
+	filePool.readFile("../res/materials/blanket/normal.dds", textureFiles[4][1]);
+	filePool.readFile("../res/materials/blanket/roughnessao.dds", textureFiles[4][2]);
+	filePool.readFile("../res/materials/blanket/height.dds", textureFiles[4][4]);
 
-	RIN::Texture* textures[4][6]{};
-	constexpr uint32_t black = 0;
-	constexpr uint32_t white = 0xFFFFFFFF;
-	textures[0][3] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8_UNORM, 1, 1, 1, (char*)&black);
-	textures[1][3] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8_UNORM, 1, 1, 1, (char*)&white);
-	textures[2][3] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8_UNORM, 1, 1, 1, (char*)&black);
-	textures[3][5] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8G8_UNORM, 1, 1, 1, (char*)&white);
+	RIN::Texture* textures[5][6]{};
+	constexpr char black[]{ 0 };
+	constexpr char white[]{ (char)0xFF };
+	constexpr char sheen[]{ (char)0xC0, (char)0xC0, (char)0xE0, 0 };
+	textures[0][3] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8_UNORM, 1, 1, 1, black);
+	textures[1][3] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8_UNORM, 1, 1, 1, white);
+	textures[2][3] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8_UNORM, 1, 1, 1, black);
+	textures[4][5] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, RIN::TEXTURE_FORMAT::R8G8B8A8_UNORM_SRGB, 1, 1, 1, sheen);
 
-	RIN::MATERIAL_TYPE materialTypes[]{ RIN::MATERIAL_TYPE::PBR_STANDARD, RIN::MATERIAL_TYPE::PBR_STANDARD, RIN::MATERIAL_TYPE::PBR_EMISSIVE, RIN::MATERIAL_TYPE::PBR_CLEAR_COAT };
-	RIN::Material* materials[4]{};
+	RIN::MATERIAL_TYPE materialTypes[]{
+		RIN::MATERIAL_TYPE::PBR_STANDARD,
+		RIN::MATERIAL_TYPE::PBR_STANDARD,
+		RIN::MATERIAL_TYPE::PBR_EMISSIVE,
+		RIN::MATERIAL_TYPE::PBR_CLEAR_COAT,
+		RIN::MATERIAL_TYPE::PBR_SHEEN
+	};
+	RIN::Material* materials[5]{};
 
 	// Read mesh files
-	FilePool::File staticFiles[9];
+	FilePool::File staticFiles[13];
 	filePool.readFile("../res/meshes/Cube.smesh", staticFiles[0]);
 	filePool.readFile("../res/meshes/Cylinder.smesh", staticFiles[1]);
 	filePool.readFile("../res/meshes/Plane.smesh", staticFiles[2]);
 	filePool.readFile("../res/meshes/Sphere0.smesh", staticFiles[3]);
 	filePool.readFile("../res/meshes/Sphere1.smesh", staticFiles[4]);
 	filePool.readFile("../res/meshes/Sphere2.smesh", staticFiles[5]);
-	filePool.readFile("../res/meshes/Torus0.smesh", staticFiles[6]);
-	filePool.readFile("../res/meshes/Torus1.smesh", staticFiles[7]);
-	filePool.readFile("../res/meshes/Torus2.smesh", staticFiles[8]);
+	filePool.readFile("../res/meshes/Sphere3.smesh", staticFiles[6]);
+	filePool.readFile("../res/meshes/Sphere4.smesh", staticFiles[7]);
+	filePool.readFile("../res/meshes/Sphere5.smesh", staticFiles[8]);
+	filePool.readFile("../res/meshes/Torus0.smesh", staticFiles[9]);
+	filePool.readFile("../res/meshes/Torus1.smesh", staticFiles[10]);
+	filePool.readFile("../res/meshes/Torus2.smesh", staticFiles[11]);
+	filePool.readFile("../res/meshes/Cone.smesh", staticFiles[12]);
 
-	RIN::StaticMesh* staticMeshes[9]{};
+	RIN::StaticMesh* staticMeshes[13]{};
 	
-	uint32_t staticObjectMaterials[]{ 3, 1, 0, 0, 1, 2, 1, 0, 3 };
-	RIN::StaticObject* staticObjects[9]{};
+	uint32_t staticObjectMaterials[]{ 3, 1, 0, 0, 1, 3, 4, 2, 3, 1, 0, 4, 2 };
+	RIN::StaticObject* staticObjects[13]{};
 
 	FilePool::File dynamicFiles[2];
 	filePool.readFile("../res/meshes/Monster.dmesh", dynamicFiles[0]);
@@ -249,10 +265,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
 	RIN::DynamicMesh* dynamicMeshes[2]{};
 
-	uint32_t dynamicObjectMaterials[]{ 2, 1 };
-	RIN::DynamicObject* dynamicObjects[2]{};
+	uint32_t dynamicObjectMeshes[]{ 0, 1, 0 };
+	uint32_t dynamicObjectMaterials[]{ 2, 1, 4 };
+	RIN::DynamicObject* dynamicObjects[3]{};
 
-	SceneGraph::DynamicObjectNode* dynamicObjectNodes[2]{};
+	SceneGraph::DynamicObjectNode* dynamicObjectNodes[3]{};
 
 	FilePool::File skinnedFiles[1];
 	filePool.readFile("../res/meshes/Monster.skmesh", skinnedFiles[0]);
@@ -298,9 +315,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 	lights[5]->radius = 5.0f;
 	lights[5]->color = { 5.0f, 5.0f, 5.0f };
 
-	lights[6]->radius = 15.0f;
+	lights[6]->radius = 25.0f;
 
-	lights[7]->radius = 15.0f;
+	lights[7]->radius = 25.0f;
 
 	SceneGraph::LightNode* lightNodes[2]{};
 
@@ -330,15 +347,26 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
 		// Upload objects and materials and free buffers
 
-		for(uint32_t i = 0; i < _countof(environmentFiles); ++i)
-			if(environmentFiles[i].ready() && environmentTextures[i]->resident())
-				environmentFiles[i].close();
+		for(uint32_t i = 0; i < _countof(environmentFiles); ++i) {
+			if(environmentFiles[i].ready()) {
+				if(!environmentTextures[i]) {
+					environmentTextures[i] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_CUBE, RIN::TEXTURE_FORMAT::R16B16G16A16_FLOAT, 512, 512, environmentMipCounts[i], environmentFiles[i].data() + 148);
+				} else if(environmentTextures[i]->resident())
+					environmentFiles[i].close();
+			}
+		}
+
+		if(!skyboxSet && environmentTextures[0] && environmentTextures[1] && environmentTextures[2]) {
+			renderer->setSkybox(environmentTextures[0], environmentTextures[1], environmentTextures[2]);
+
+			skyboxSet = true;
+		}
 
 		for(uint32_t i = 0; i < _countof(textureFiles); ++i) {
 			for(uint32_t j = 0; j < _countof(textureFiles[i]); ++j) {
 				if(textureFiles[i][j].ready()) {
 					if(!textures[i][j])
-						textures[i][j] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, textureFormats[j], 2048, 2048, -1, textureFiles[i][j].data() + 148);
+						textures[i][j] = renderer->addTexture(RIN::TEXTURE_TYPE::TEXTURE_2D, textureFormats[i][j], 2048, 2048, -1, textureFiles[i][j].data() + 148);
 					else if(textures[i][j]->resident())
 						textureFiles[i][j].close();
 				}
@@ -347,8 +375,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 			if(!materials[i]) {
 				bool ready = true;
 
-				for(uint32_t j = 0; j < 5; ++j)
-					ready = ready && textures[i][j];
+				if(materialTypes[i] == RIN::MATERIAL_TYPE::PBR_SHEEN)
+					ready = textures[i][0] && textures[i][1] && textures[i][2] && textures[i][4];
+				else
+					for(uint32_t j = 0; j < 5; ++j)
+						ready = ready && textures[i][j];
 
 				if(materialTypes[i] != RIN::MATERIAL_TYPE::PBR_STANDARD)
 					ready = ready && textures[i][5];
@@ -408,7 +439,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
 		for(uint32_t i = 0; i < _countof(dynamicObjects); ++i) {
 			if(!dynamicObjects[i]) {
-				dynamicObjects[i] = renderer->addDynamicObject(dynamicMeshes[i], materials[dynamicObjectMaterials[i]]);
+				dynamicObjects[i] = renderer->addDynamicObject(dynamicMeshes[dynamicObjectMeshes[i]], materials[dynamicObjectMaterials[i]]);
 				if(dynamicObjects[i]) dynamicObjectNodes[i] = sceneGraph.addNode(SceneGraph::ROOT_NODE, dynamicObjects[i]);
 			}
 		}
@@ -481,8 +512,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 		float cosUNorm = cosf(scale * DirectX::XM_2PI) * 0.5f + 0.5f;
 		float cosUNorm2 = cosf(scale * 2.0f * DirectX::XM_2PI) * 0.5f + 0.5f;
 
-		if(dynamicObjectNodes[0]) dynamicObjectNodes[0]->setTansform(DirectX::XMMatrixRotationZ(DirectX::XM_PI) * DirectX::XMMatrixTranslation(-0.5f, -10.0f, 0.0f));
-		if(dynamicObjectNodes[1]) dynamicObjectNodes[1]->setTansform(DirectX::XMMatrixRotationX(DirectX::XM_PIDIV4) * DirectX::XMMatrixRotationZ(scale * DirectX::XM_2PI) * DirectX::XMMatrixTranslation(9.0f, -8.0f, 2.5f + sinSNorm * 0.5f));
+		if(dynamicObjectNodes[0]) dynamicObjectNodes[0]->setTansform(DirectX::XMMatrixRotationZ(DirectX::XM_PI * 0.85f) * DirectX::XMMatrixTranslation(-2.5f, -9.0f, 0.0f));
+		if(dynamicObjectNodes[1]) dynamicObjectNodes[1]->setTansform(DirectX::XMMatrixRotationX(DirectX::XM_PIDIV4) * DirectX::XMMatrixRotationZ(scale * DirectX::XM_2PI) * DirectX::XMMatrixTranslation(-4.0f, 8.0f, 2.5f + sinSNorm * 0.5f));
+		if(dynamicObjectNodes[2]) dynamicObjectNodes[2]->setTansform(DirectX::XMMatrixRotationZ(DirectX::XM_PI * 1.15f) * DirectX::XMMatrixTranslation(9.5f, -9.0f, 0.0f));
 
 		if(boneNodes[0]) {
 			// Body

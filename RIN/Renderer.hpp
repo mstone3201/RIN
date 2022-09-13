@@ -89,7 +89,6 @@ namespace RIN {
 	Renderer::addLight is thread-safe
 	Renderer::removeLight is thread-safe
 	Renderer::setSkybox is not thread-safe
-	Renderer::setBRDFLUT is not thread-safe
 	Renderer::update is not thread-safe
 	Renderer::render is not thread-safe
 	Renderer::resizeSwapChain is not thread-safe
@@ -176,8 +175,8 @@ namespace RIN {
 		virtual void removeMaterial(Material* material) = 0;
 		virtual Light* addLight() = 0;
 		virtual void removeLight(Light*) = 0;
-		virtual void setSkybox(Texture* skybox, Texture* diffuseIBL, Texture* specularIBL) = 0;
-		virtual void setBRDFLUT(Texture* texture) = 0;
+		virtual void setSkybox(Texture* skybox, Texture* iblDiffuse, Texture* iblSpecular) = 0;
+		virtual void clearSkybox() = 0;
 		// Update and commit upload
 		virtual void update() = 0;
 

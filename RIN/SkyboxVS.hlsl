@@ -14,7 +14,10 @@ ConstantBuffer<Camera> cameraBuffer : register(b0);
 		"DENY_GEOMETRY_SHADER_ROOT_ACCESS"\
 	"),"\
 	"CBV(b0, visibility = SHADER_VISIBILITY_VERTEX),"\
-	"DescriptorTable(SRV(t0), visibility = SHADER_VISIBILITY_PIXEL),"\
+	"DescriptorTable("\
+		"SRV(t0, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
+		"visibility = SHADER_VISIBILITY_PIXEL"\
+	"),"\
 	"StaticSampler("\
 		"s0,"\
 		"filter = FILTER_MIN_MAG_LINEAR_MIP_POINT,"\

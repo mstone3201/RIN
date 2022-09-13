@@ -74,3 +74,11 @@ uint getClusterK(float viewZ, float nearZ, float farZ) {
 uint getClusterKConstants(float viewZ, float a, float b) {
 	return log2(-viewZ) * a - b;
 }
+
+// Returns the falloff of a point light with radius r at distance d
+float getPointLightFalloff(float r, float d) {
+	float window = d / r;
+	float window2 = window * window;
+	float numsqrt = saturate(1.0f - window2 * window2);
+	return numsqrt * numsqrt / (d * d + 1.0f);
+}

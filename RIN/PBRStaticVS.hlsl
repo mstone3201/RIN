@@ -18,14 +18,16 @@ StructuredBuffer<StaticObject> staticObjectBuffer : register(t0);
 		"DENY_GEOMETRY_SHADER_ROOT_ACCESS"\
 	"),"\
 	"RootConstants(num32BitConstants = 1, b0, visibility = SHADER_VISIBILITY_VERTEX),"\
-	"RootConstants(num32BitConstants = 4, b0, visibility = SHADER_VISIBILITY_PIXEL),"\
+	"RootConstants(num32BitConstants = 1, b0, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"CBV(b1),"\
 	"SRV(t0, visibility = SHADER_VISIBILITY_VERTEX),"\
 	"SRV(t0, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"SRV(t1, visibility = SHADER_VISIBILITY_PIXEL),"\
 	"DescriptorTable("\
-		"SRV(t0, numDescriptors = unbounded, space = 1, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
-		"SRV(t0, numDescriptors = unbounded, space = 2, offset = 0, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
+		"SRV(t2),"\
+		"SRV(t3, offset = 2, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
+		"SRV(t4, offset = 3, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
+		"SRV(t0, offset = 4, numDescriptors = unbounded, space = 1, flags = DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE),"\
 		"visibility = SHADER_VISIBILITY_PIXEL"
 	"),"\
 	"StaticSampler(s0, visibility = SHADER_VISIBILITY_PIXEL),"\

@@ -4,7 +4,7 @@
 
 #include "Error.hpp"
 
-#define RIN_DEBUG
+//#define RIN_DEBUG
 
 #ifdef RIN_DEBUG
 #define RIN_DEBUG_ERROR(message) std::cout << "RIN ERROR:\t" << (message) << std::endl

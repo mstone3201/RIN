@@ -68,9 +68,6 @@
     <ClInclude Include="Renderer.hpp">
       <Filter>Renderer\_Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Geometry.hpp">
-      <Filter>_Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Pool.hpp">
       <Filter>Util\_Header Files</Filter>
     </ClInclude>
@@ -227,7 +224,7 @@
     <None Include="SceneObject.hlsli">
       <Filter>Shaders\D3D12\Header</Filter>
     </None>
-    <None Include="Util.hlsli">
+    <None Include="BRDF.hlsli">
       <Filter>Shaders\D3D12\Header</Filter>
     </None>
     <None Include="PBRInputs.hlsli">

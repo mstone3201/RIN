@@ -185,7 +185,6 @@
     <ClInclude Include="Debug.hpp" />
     <ClInclude Include="D3D12Renderer.hpp" />
     <ClInclude Include="Error.hpp" />
-    <ClInclude Include="Geometry.hpp" />
     <ClInclude Include="Pool.hpp" />
     <ClInclude Include="PoolAllocator.hpp" />
     <ClInclude Include="Renderer.hpp" />
@@ -203,7 +202,7 @@
     <None Include="Light.hlsli" />
     <None Include="PBRInputs.hlsli" />
     <None Include="SceneObject.hlsli" />
-    <None Include="Util.hlsli" />
+    <None Include="BRDF.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BumpAllocator.cpp" />

@@ -207,6 +207,10 @@ namespace RIN {
 		D3D12_INDEX_BUFFER_VIEW sceneDynamicIBV{};
 		D3D12_INDEX_BUFFER_VIEW sceneSkinnedIBV{};
 		ID3D12Heap* sceneTextureHeap{};
+		uint64_t sceneTextureOffset;
+		ID3D12Resource* sceneDFGLUT{};
+		ID3D12Resource* sceneZeroCubeTexture{};
+		uint32_t sceneIBLSpecularMIPCount = 1;
 
 		FreeListAllocator sceneStaticVertexAllocator;
 		FreeListAllocator sceneStaticIndexAllocator;
@@ -228,12 +232,6 @@ namespace RIN {
 		DynamicPool<D3D12Texture> sceneTexturePool;
 		DynamicPool<Material> sceneMaterialPool;
 		DynamicPool<Light> sceneLightPool;
-		D3D12Texture* skyboxTexture{};
-		D3D12Texture* diffuseIBLTexture{};
-		D3D12Texture* specularIBLTexture{};
-		D3D12Texture* brdfLUT{};
-		// It is unlikely that the brdfLUT will change, so if it does just record the
-		// skybox commands again anyway to avoid extra logic and bookkeeping
 		bool skyboxDirty = true;
 		Bone* sceneBones;
 
@@ -246,8 +244,6 @@ namespace RIN {
 		void destroyUploadStream() noexcept;
 		void createScenePipeline();
 		void destroyScenePipeline() noexcept;
-		void createGUIPipeline();
-		void destroyGUIPipeline() noexcept;
 		void createSwapChainDependencies();
 		void destroySwapChainDependencies() noexcept;
 		void createSceneBackBuffer();
@@ -342,8 +338,8 @@ namespace RIN {
 		void removeMaterial(Material* material) override;
 		Light* addLight() override;
 		void removeLight(Light* light) override;
-		void setSkybox(Texture* skybox, Texture* diffuseIBL, Texture* specularIBL) override;
-		void setBRDFLUT(Texture* texture) override;
+		void setSkybox(Texture* skybox, Texture* iblDiffuse, Texture* iblSpecular) override;
+		void clearSkybox() override;
 		// GUI
 		// Update and upload commit
 		void update() override;

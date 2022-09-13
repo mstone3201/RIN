@@ -21,9 +21,12 @@
 #include "shaders/PostVS.h"
 #include "shaders/PostPS.h"
 
+// Data
+#include "data/Geometry.h"
+#include "data/DFGLUT.h"
+
 // Project
 #include "Error.hpp"
-#include "Geometry.hpp"
 #include "D3D12ShaderData.hpp"
 
 constexpr DXGI_FORMAT BACK_BUFFER_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -74,7 +77,11 @@ static_assert(SCENE_FRUSTUM_CLUSTER_DEPTH % LIGHT_CLUSTER_THREAD_GROUP_SIZE_Z ==
 36: (UAV) sceneDynamicCommandBuffer
 37: (UAV) sceneSkinnedCommandBuffer
 38: (UAV) sceneLightClusterBuffer
-39-unbounded: (SRV) sceneTexture
+39: (SRV) sceneDFGLUT
+40: (SRV) sceneSkyboxTexture
+41: (SRV) sceneIBLDiffuseTexture
+42: (SRV) sceneIBLSpecularTexture
+43-unbounded: (SRV) sceneTexture
 */
 constexpr uint32_t SCENE_BACK_BUFFER_SRV_OFFSET = 0;
 constexpr uint32_t SCENE_DEPTH_BUFFER_SRV_OFFSET = 1;
@@ -85,8 +92,11 @@ constexpr uint32_t SCENE_STATIC_COMMAND_BUFFER_UAV_OFFSET = 35;
 constexpr uint32_t SCENE_DYNAMIC_COMMAND_BUFFER_UAV_OFFSET = 36;
 constexpr uint32_t SCENE_SKINNED_COMMAND_BUFFER_UAV_OFFSET = 37;
 constexpr uint32_t SCENE_LIGHT_CLUSTER_BUFFER_UAV_OFFSET = 38;
-constexpr uint32_t SCENE_DESC_CONST_COUNT = 39;
-constexpr uint32_t SCENE_TEXTURE_SRV_OFFSET = 39;
+constexpr uint32_t SCENE_DFG_LUT_SRV_OFFSET = 39;
+constexpr uint32_t SCENE_SKYBOX_TEXTURE_SRV_OFFSET = 40;
+constexpr uint32_t SCENE_IBL_DIFFUSE_TEXTURE_SRV_OFFSET = 41;
+constexpr uint32_t SCENE_IBL_SPECULAR_TEXTURE_SRV_OFFSET = 42;
+constexpr uint32_t SCENE_TEXTURE_SRV_OFFSET = 43;
 
 #ifdef RIN_DEBUG
 constexpr uint32_t DEBUG_QUERY_PIPELINE_STATIC_RENDER = 0;
@@ -400,6 +410,9 @@ namespace RIN {
 		
 		uploadStreamOffset = uploadLightOffset + uploadLightSize;
 
+		if(UINT64_MAX - uploadStreamOffset < config.uploadStreamSize)
+			RIN_ERROR("Upload buffer size exceeded UINT64_MAX");
+
 		// Create a committed upload resource
 		D3D12_HEAP_PROPERTIES heapProperties{};
 		heapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -446,7 +459,6 @@ namespace RIN {
 		try {
 			createUploadStream();
 			createScenePipeline();
-			createGUIPipeline();
 		} catch(...) {
 			destroy();
 			throw;
@@ -519,7 +531,6 @@ namespace RIN {
 		}
 		destroyUploadStream();
 		destroyScenePipeline();
-		destroyGUIPipeline();
 	}
 
 	void D3D12Renderer::createUploadStream() {
@@ -559,7 +570,7 @@ namespace RIN {
 		// Create culling descriptor heap
 		D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc{};
 		descriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		descriptorHeapDesc.NumDescriptors = SCENE_DESC_CONST_COUNT + config.textureCount;
+		descriptorHeapDesc.NumDescriptors = SCENE_TEXTURE_SRV_OFFSET + config.textureCount;
 		descriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		descriptorHeapDesc.NodeMask = 0;
 
@@ -1158,8 +1169,8 @@ namespace RIN {
 		RIN_DEBUG_NAME(postCommandAllocator, "Post Command Allocator");
 
 		// Create post processing command list
-		// We are going to hijack this command list to upload
-		// geometry so start it in the recording state
+		// We are going to hijack this command list to do the
+		// initialization upload so start it in the recording state
 		result = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, postCommandAllocator, nullptr, IID_PPV_ARGS(&postCommandList));
 		if(FAILED(result)) RIN_ERROR("Failed to create post processing command list");
 		RIN_DEBUG_NAME(postCommandList, "Post Command List");
@@ -1197,7 +1208,7 @@ namespace RIN {
 		const uint64_t skinnedCommandBufferSize = ALIGN_TO(SCENE_SKINNED_COMMAND_SIZE * (config.skinnedObjectCount + 1), D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
 
 		// Geometry buffer and static vertex buffer share a resource
-		constexpr uint64_t geometryBufferSize = (uint64_t)Geometry::SCREEN_QUAD_SIZE + Geometry::SKYBOX_SIZE;
+		constexpr uint64_t geometryBufferSize = (uint64_t)SCREEN_QUAD_SIZE + SKYBOX_SIZE;
 
 		const uint64_t staticVertexBufferOffset = skinnedCommandBufferOffset + skinnedCommandBufferSize;
 		const uint64_t staticVertexBufferSize = ALIGN_TO(sceneStaticVertexAllocator.getSize() + geometryBufferSize, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
@@ -1567,12 +1578,12 @@ namespace RIN {
 
 		// Create scene geometry vbvs
 		postScreenQuadVBV.BufferLocation = sceneStaticVertexBuffer->GetGPUVirtualAddress() + geometryBufferOffset;
-		postScreenQuadVBV.SizeInBytes = Geometry::SCREEN_QUAD_SIZE;
-		postScreenQuadVBV.StrideInBytes = Geometry::SCREEN_QUAD_STRIDE;
+		postScreenQuadVBV.SizeInBytes = SCREEN_QUAD_SIZE;
+		postScreenQuadVBV.StrideInBytes = SCREEN_QUAD_STRIDE;
 
-		skyboxVBV.BufferLocation = postScreenQuadVBV.BufferLocation + Geometry::SCREEN_QUAD_SIZE;
-		skyboxVBV.SizeInBytes = Geometry::SKYBOX_SIZE;
-		skyboxVBV.StrideInBytes = Geometry::SKYBOX_STRIDE;
+		skyboxVBV.BufferLocation = postScreenQuadVBV.BufferLocation + SCREEN_QUAD_SIZE;
+		skyboxVBV.SizeInBytes = SKYBOX_SIZE;
+		skyboxVBV.StrideInBytes = SKYBOX_STRIDE;
 
 		// Create scene static vbv
 		sceneStaticVBV.BufferLocation = sceneStaticVertexBuffer->GetGPUVirtualAddress();
@@ -1604,8 +1615,46 @@ namespace RIN {
 		sceneSkinnedIBV.SizeInBytes = (uint32_t)sceneSkinnedIndexAllocator.getSize();
 		sceneSkinnedIBV.Format = INDEX_FORMAT;
 		
+		// Get allocation info
+		D3D12_RESOURCE_DESC resourceDescs[2]{};
+		resourceDescs[0].Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		resourceDescs[0].Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+		resourceDescs[0].Width = DFG_LUT_WIDTH;
+		resourceDescs[0].Height = DFG_LUT_HEIGHT;
+		resourceDescs[0].DepthOrArraySize = 1;
+		resourceDescs[0].MipLevels = 1;
+		resourceDescs[0].Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		resourceDescs[0].SampleDesc.Count = 1;
+		resourceDescs[0].SampleDesc.Quality = 0;
+		resourceDescs[0].Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		resourceDescs[0].Flags = D3D12_RESOURCE_FLAG_NONE;
+		resourceDescs[1].Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		resourceDescs[1].Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+		resourceDescs[1].Width = 1;
+		resourceDescs[1].Height = 1;
+		resourceDescs[1].DepthOrArraySize = 6;
+		resourceDescs[1].MipLevels = 1;
+		resourceDescs[1].Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		resourceDescs[1].SampleDesc.Count = 1;
+		resourceDescs[1].SampleDesc.Quality = 0;
+		resourceDescs[1].Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+		resourceDescs[1].Flags = D3D12_RESOURCE_FLAG_NONE;
+
+		D3D12_RESOURCE_ALLOCATION_INFO1 resourceInfo[_countof(resourceDescs)];
+		D3D12_RESOURCE_ALLOCATION_INFO heapInfo = device->GetResourceAllocationInfo1(
+			0,
+			_countof(resourceDescs),
+			resourceDescs,
+			resourceInfo
+		);
+
+		sceneTextureOffset = heapInfo.SizeInBytes;
+
+		if(UINT64_MAX - sceneTextureOffset < config.texturesSize)
+			RIN_ERROR("Scene texture heap size exceeded UINT64_MAX");
+
 		// Create scene texture heap
-		heapDesc.SizeInBytes = config.texturesSize;
+		heapDesc.SizeInBytes = sceneTextureOffset + config.texturesSize;
 		heapDesc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
 		heapDesc.Properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
 		heapDesc.Properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
@@ -1618,25 +1667,154 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to create scene texture heap");
 		RIN_DEBUG_NAME(sceneTextureHeap, "Scene Texture Heap");
 
-		// Upload geometry
+		// Create scene DFG LUT
+		result = device->CreatePlacedResource(
+			sceneTextureHeap,
+			resourceInfo[0].Offset,
+			&resourceDescs[0],
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneDFGLUT)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene DFG LUT");
+		RIN_DEBUG_NAME(sceneDFGLUT, "Scene DFG LUT");
+
+		// Create scene zero cube texture
+		result = device->CreatePlacedResource(
+			sceneTextureHeap,
+			resourceInfo[1].Offset,
+			&resourceDescs[1],
+			D3D12_RESOURCE_STATE_COMMON,
+			nullptr,
+			IID_PPV_ARGS(&sceneZeroCubeTexture)
+		);
+		if(FAILED(result)) RIN_ERROR("Failed to create scene zero cube texture");
+		RIN_DEBUG_NAME(sceneZeroCubeTexture, "Scene Zero Cube Texture");
+
+		// Create scene DFG LUT SRV
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = resourceDescs[0].Format;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Texture2D.MipLevels = 1;
+		srvDesc.Texture2D.PlaneSlice = 0;
+		srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+
+		device->CreateShaderResourceView(sceneDFGLUT, &srvDesc, getSceneDescHeapCPUHandle(SCENE_DFG_LUT_SRV_OFFSET));
+
+		// Create scene skybox texture SRV
+		srvDesc.Format = resourceDescs[1].Format;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+		srvDesc.TextureCube.MostDetailedMip = 0;
+		srvDesc.TextureCube.MipLevels = 1;
+		srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+
+		device->CreateShaderResourceView(sceneZeroCubeTexture, &srvDesc, getSceneDescHeapCPUHandle(SCENE_SKYBOX_TEXTURE_SRV_OFFSET));
+
+		// Create scene IBL diffuse texture SRV
+		device->CreateShaderResourceView(sceneZeroCubeTexture, &srvDesc, getSceneDescHeapCPUHandle(SCENE_IBL_DIFFUSE_TEXTURE_SRV_OFFSET));
+
+		// Create scene IBL specular texture SRV
+		device->CreateShaderResourceView(sceneZeroCubeTexture, &srvDesc, getSceneDescHeapCPUHandle(SCENE_IBL_SPECULAR_TEXTURE_SRV_OFFSET));
+
+		// Initialization upload
 		// No need to make any allocations here
+		const uint64_t alignedGeometrySize = ALIGN_TO((uint64_t)SCREEN_QUAD_SIZE + SKYBOX_SIZE, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+		const uint64_t alignedDFGLUTPitch = ALIGN_TO(DFG_LUT_WIDTH * sizeof(uint16_t) * 4, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+		const uint64_t alignedDFGLUTSize = ALIGN_TO(alignedDFGLUTPitch * DFG_LUT_HEIGHT, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+		const uint64_t alignedZeroCubeSize = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT * 6;
+
+		if(uploadStreamOffset + config.uploadStreamSize < alignedGeometrySize + alignedDFGLUTSize + alignedZeroCubeSize)
+			RIN_ERROR("Failed to upload initialization data because the upload stream is too small");
 
 		// Copy geometry data to the upload buffer
-		memcpy(uploadBufferData, Geometry::SCREEN_QUAD_VERTICES, Geometry::SCREEN_QUAD_SIZE);
-		memcpy(uploadBufferData + Geometry::SCREEN_QUAD_SIZE, Geometry::SKYBOX_VERTICES, Geometry::SKYBOX_SIZE);
-		
-		// Record upload commands
-		
-		// Copy from data upload resource to vertex buffer
+		memcpy(uploadBufferData, SCREEN_QUAD_VERTICES, SCREEN_QUAD_SIZE);
+		memcpy(uploadBufferData + SCREEN_QUAD_SIZE, SKYBOX_VERTICES, SKYBOX_SIZE);
+
+		// Copy from upload buffer to vertex buffer
 		postCommandList->CopyBufferRegion(sceneStaticVertexBuffer, geometryBufferOffset, uploadBuffer, 0, geometryBufferSize);
+
+		// Copy DFG LUT to the upload buffer
+		char* alignedData = uploadBufferData + alignedGeometrySize;
+		const uint16_t* dfgData = DFG_LUT;
+		for(uint32_t row = 0; row < DFG_LUT_HEIGHT; ++row) {
+			for(uint32_t i = 0; i < DFG_LUT_WIDTH; ++i) {
+				memcpy(alignedData + i * sizeof(uint16_t) * 4, dfgData, sizeof(uint16_t) * 3);
+
+				dfgData += 3;
+			}
+
+			alignedData += alignedDFGLUTPitch;
+		}
+
+		// Copy from upload buffer to texture
+		D3D12_TEXTURE_COPY_LOCATION copyDest{};
+		copyDest.pResource = sceneDFGLUT;
+		copyDest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		copyDest.SubresourceIndex = 0;
+
+		D3D12_TEXTURE_COPY_LOCATION copySrc{};
+		copySrc.pResource = uploadBuffer;
+		copySrc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		copySrc.PlacedFootprint.Offset = alignedGeometrySize;
+		copySrc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		copySrc.PlacedFootprint.Footprint.Width = DFG_LUT_WIDTH;
+		copySrc.PlacedFootprint.Footprint.Height = DFG_LUT_HEIGHT;
+		copySrc.PlacedFootprint.Footprint.Depth = 1;
+		copySrc.PlacedFootprint.Footprint.RowPitch = alignedDFGLUTPitch;
+
+		postCommandList->CopyTextureRegion(&copyDest, 0, 0, 0, &copySrc, nullptr);
+
+		// Copy scene zero cube texture to the upload buffer
+		memset(uploadBufferData + alignedGeometrySize + alignedDFGLUTSize, 0, alignedZeroCubeSize);
+
+		// Copy from upload buffer to texture
+		copyDest.pResource = sceneZeroCubeTexture;
+		copyDest.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		copyDest.SubresourceIndex = 0;
+
+		copySrc.pResource = uploadBuffer;
+		copySrc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		copySrc.PlacedFootprint.Offset = alignedGeometrySize + alignedDFGLUTSize;
+		copySrc.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		copySrc.PlacedFootprint.Footprint.Width = 1;
+		copySrc.PlacedFootprint.Footprint.Height = 1;
+		copySrc.PlacedFootprint.Footprint.Depth = 1;
+		copySrc.PlacedFootprint.Footprint.RowPitch = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT;
+
+		for(uint32_t slice = 0; slice < 6; ++slice) {
+			postCommandList->CopyTextureRegion(&copyDest, 0, 0, 0, &copySrc, nullptr);
+
+			++copyDest.SubresourceIndex;
+
+			copySrc.PlacedFootprint.Offset += D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+		}
+
+		// Non-simultaneous-access textures don't have common state decay
+		// so we need to transition them back to common manually
+		D3D12_RESOURCE_BARRIER barriers[2]{};
+		barriers[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barriers[0].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		barriers[0].Transition.pResource = sceneDFGLUT;
+		barriers[0].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+		barriers[0].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+		barriers[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barriers[1].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		barriers[1].Transition.pResource = sceneZeroCubeTexture;
+		barriers[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+		barriers[1].Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+		barriers[1].Transition.StateAfter = D3D12_RESOURCE_STATE_COMMON;
+
+		postCommandList->ResourceBarrier(_countof(barriers), barriers);
 
 		// Close command list once recording is done
 		result = postCommandList->Close();
 		if(FAILED(result)) RIN_ERROR("Failed to close post command list");
 
 		// Execute copy on the graphics queue
-		ID3D12CommandList* commandLists[] { postCommandList };
-		graphicsQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+		graphicsQueue->ExecuteCommandLists(1, (ID3D12CommandList**)&postCommandList);
 
 		result = graphicsQueue->Signal(graphicsFence, ++graphicsFenceValue);
 		if(FAILED(result)) RIN_ERROR("Failed to signal graphics queue");
@@ -1920,12 +2098,16 @@ namespace RIN {
 			sceneTextureHeap->Release();
 			sceneTextureHeap = nullptr;
 		}
+		if(sceneDFGLUT) {
+			sceneDFGLUT->Release();
+			sceneDFGLUT = nullptr;
+		}
+		if(sceneZeroCubeTexture) {
+			sceneZeroCubeTexture->Release();
+			sceneZeroCubeTexture = nullptr;
+		}
 		destroyDeadTextures();
 	}
-
-	void D3D12Renderer::createGUIPipeline() {}
-
-	void D3D12Renderer::destroyGUIPipeline() noexcept {}
 
 	void D3D12Renderer::createSwapChainDependencies() {
 		// Used to maintain the old back buffer count in the event that
@@ -2435,10 +2617,6 @@ namespace RIN {
 	}
 
 	void D3D12Renderer::recordSceneStaticCommandList() {
-		if(!diffuseIBLTexture) RIN_ERROR("Failed to record scene static command list because no diffuse IBL texture was set");
-		if(!specularIBLTexture) RIN_ERROR("Failed to record scene static command list because no specular IBL texture was set");
-		if(!brdfLUT) RIN_ERROR("Failed to record scene static command list because no BRDF LUT was set");
-
 		// Reset command allocator to reuse its memory
 		HRESULT result = sceneStaticCommandAllocator->Reset();
 		if(FAILED(result)) RIN_ERROR("Failed to reset static scene rendering command allocator");
@@ -2459,21 +2637,15 @@ namespace RIN {
 		sceneStaticCommandList->ResourceBarrier(_countof(barriers), barriers);
 
 		// Descriptor binding
-		uint32_t iblData[]{
-			sceneTexturePool.getIndex(diffuseIBLTexture),
-			sceneTexturePool.getIndex(specularIBLTexture),
-			specularIBLTexture->resource->GetDesc().MipLevels,
-			sceneTexturePool.getIndex(brdfLUT)
-		};
 
 		sceneStaticCommandList->SetDescriptorHeaps(1, &sceneDescHeap);
 		sceneStaticCommandList->SetGraphicsRootSignature(sceneStaticRootSignature);
-		sceneStaticCommandList->SetGraphicsRoot32BitConstants(1, _countof(iblData), iblData, 0);
+		sceneStaticCommandList->SetGraphicsRoot32BitConstant(1, sceneIBLSpecularMIPCount, 0);
 		sceneStaticCommandList->SetGraphicsRootConstantBufferView(2, sceneCameraBuffer->GetGPUVirtualAddress());
 		sceneStaticCommandList->SetGraphicsRootShaderResourceView(3, sceneStaticObjectBuffer->GetGPUVirtualAddress());
 		sceneStaticCommandList->SetGraphicsRootShaderResourceView(4, sceneLightBuffer->GetGPUVirtualAddress());
 		sceneStaticCommandList->SetGraphicsRootShaderResourceView(5, sceneLightClusterBuffer->GetGPUVirtualAddress());
-		sceneStaticCommandList->SetGraphicsRootDescriptorTable(6, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
+		sceneStaticCommandList->SetGraphicsRootDescriptorTable(6, getSceneDescHeapGPUHandle(SCENE_DFG_LUT_SRV_OFFSET));
 
 		// Input-Assembler
 		sceneStaticCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -2517,10 +2689,6 @@ namespace RIN {
 	}
 
 	void D3D12Renderer::recordSceneDynamicCommandList() {
-		if(!diffuseIBLTexture) RIN_ERROR("Failed to record scene dynamic command list because no diffuse IBL texture was set");
-		if(!specularIBLTexture) RIN_ERROR("Failed to record scene dynamic command list because no specular IBL texture was set");
-		if(!brdfLUT) RIN_ERROR("Failed to record scene dynamic command list because no BRDF LUT was set");
-
 		// Reset command allocator to reuse its memory
 		HRESULT result = sceneDynamicCommandAllocator->Reset();
 		if(FAILED(result)) RIN_ERROR("Failed to reset dynamic scene rendering command allocator");
@@ -2530,21 +2698,14 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to reset dynamic scene rendering command list");
 
 		// Descriptor binding
-		uint32_t iblData[]{
-			sceneTexturePool.getIndex(diffuseIBLTexture),
-			sceneTexturePool.getIndex(specularIBLTexture),
-			specularIBLTexture->resource->GetDesc().MipLevels,
-			sceneTexturePool.getIndex(brdfLUT)
-		};
-
 		sceneDynamicCommandList->SetDescriptorHeaps(1, &sceneDescHeap);
 		sceneDynamicCommandList->SetGraphicsRootSignature(sceneDynamicRootSignature);
-		sceneDynamicCommandList->SetGraphicsRoot32BitConstants(1, _countof(iblData), iblData, 0);
+		sceneDynamicCommandList->SetGraphicsRoot32BitConstant(1, sceneIBLSpecularMIPCount, 0);
 		sceneDynamicCommandList->SetGraphicsRootConstantBufferView(2, sceneCameraBuffer->GetGPUVirtualAddress());
 		sceneDynamicCommandList->SetGraphicsRootShaderResourceView(3, sceneDynamicObjectBuffer->GetGPUVirtualAddress());
 		sceneDynamicCommandList->SetGraphicsRootShaderResourceView(4, sceneLightBuffer->GetGPUVirtualAddress());
 		sceneDynamicCommandList->SetGraphicsRootShaderResourceView(5, sceneLightClusterBuffer->GetGPUVirtualAddress());
-		sceneDynamicCommandList->SetGraphicsRootDescriptorTable(6, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
+		sceneDynamicCommandList->SetGraphicsRootDescriptorTable(6, getSceneDescHeapGPUHandle(SCENE_DFG_LUT_SRV_OFFSET));
 
 		// Input-Assembler
 		sceneDynamicCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -2584,10 +2745,6 @@ namespace RIN {
 	}
 
 	void D3D12Renderer::recordSceneSkinnedCommandList() {
-		if(!diffuseIBLTexture) RIN_ERROR("Failed to record scene skinned command list because no diffuse IBL texture was set");
-		if(!specularIBLTexture) RIN_ERROR("Failed to record scene skinned command list because no specular IBL texture was set");
-		if(!brdfLUT) RIN_ERROR("Failed to record scene skinned command list because no BRDF LUT was set");
-
 		// Reset command allocator to reuse its memory
 		HRESULT result = sceneSkinnedCommandAllocator->Reset();
 		if(FAILED(result)) RIN_ERROR("Failed to reset skinned scene rendering command allocator");
@@ -2597,22 +2754,15 @@ namespace RIN {
 		if(FAILED(result)) RIN_ERROR("Failed to reset skinned scene rendering command list");
 
 		// Descriptor binding
-		uint32_t iblData[]{
-			sceneTexturePool.getIndex(diffuseIBLTexture),
-			sceneTexturePool.getIndex(specularIBLTexture),
-			specularIBLTexture->resource->GetDesc().MipLevels,
-			sceneTexturePool.getIndex(brdfLUT)
-		};
-
 		sceneSkinnedCommandList->SetDescriptorHeaps(1, &sceneDescHeap);
 		sceneSkinnedCommandList->SetGraphicsRootSignature(sceneSkinnedRootSignature);
-		sceneSkinnedCommandList->SetGraphicsRoot32BitConstants(1, _countof(iblData), iblData, 0);
+		sceneSkinnedCommandList->SetGraphicsRoot32BitConstant(1, sceneIBLSpecularMIPCount, 0);
 		sceneSkinnedCommandList->SetGraphicsRootConstantBufferView(2, sceneCameraBuffer->GetGPUVirtualAddress());
 		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(3, sceneSkinnedObjectBuffer->GetGPUVirtualAddress());
 		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(4, sceneBoneBuffer->GetGPUVirtualAddress());
 		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(5, sceneLightBuffer->GetGPUVirtualAddress());
 		sceneSkinnedCommandList->SetGraphicsRootShaderResourceView(6, sceneLightClusterBuffer->GetGPUVirtualAddress());
-		sceneSkinnedCommandList->SetGraphicsRootDescriptorTable(7, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET));
+		sceneSkinnedCommandList->SetGraphicsRootDescriptorTable(7, getSceneDescHeapGPUHandle(SCENE_DFG_LUT_SRV_OFFSET));
 
 		// Input-Assembler
 		sceneSkinnedCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -2652,8 +2802,6 @@ namespace RIN {
 	}
 
 	void D3D12Renderer::recordSkyboxCommandList() {
-		if(!skyboxTexture) RIN_ERROR("Failed to record skybox command list because no skybox texture was set");
-
 		// Reset command allocator to reuse its memory
 		HRESULT result = skyboxCommandAllocator->Reset();
 		if(FAILED(result)) RIN_ERROR("Failed to reset skybox command allocator");
@@ -2677,7 +2825,7 @@ namespace RIN {
 		skyboxCommandList->SetDescriptorHeaps(1, &sceneDescHeap);
 		skyboxCommandList->SetGraphicsRootSignature(skyboxRootSignature);
 		skyboxCommandList->SetGraphicsRootConstantBufferView(0, sceneCameraBuffer->GetGPUVirtualAddress());
-		skyboxCommandList->SetGraphicsRootDescriptorTable(1, getSceneDescHeapGPUHandle(SCENE_TEXTURE_SRV_OFFSET + sceneTexturePool.getIndex(skyboxTexture)));
+		skyboxCommandList->SetGraphicsRootDescriptorTable(1, getSceneDescHeapGPUHandle(SCENE_SKYBOX_TEXTURE_SRV_OFFSET));
 
 		// Input-Assembler
 		skyboxCommandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
@@ -2693,7 +2841,7 @@ namespace RIN {
 		skyboxCommandList->OMSetRenderTargets(1, &rtvDescHandle, true, &dsvDescHandle);
 
 		// Draw
-		skyboxCommandList->DrawInstanced(Geometry::SKYBOX_VERTEX_COUNT, 1, 0, 0);
+		skyboxCommandList->DrawInstanced(SKYBOX_VERTEX_COUNT, 1, 0, 0);
 
 		// Transition scene depth buffer from depth read to shader resource
 		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_READ;
@@ -2764,7 +2912,7 @@ namespace RIN {
 		postCommandList->OMSetRenderTargets(1, &rtvDescHandle, true, nullptr);
 
 		// Draw
-		postCommandList->DrawInstanced(Geometry::SCREEN_QUAD_VERTEX_COUNT, 1, 0, 0);
+		postCommandList->DrawInstanced(SCREEN_QUAD_VERTEX_COUNT, 1, 0, 0);
 
 		// Transition back buffer from render target to present
 		barriers[0].Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -3200,7 +3348,7 @@ namespace RIN {
 					objectData->material.baseColorID = sceneTexturePool.getIndex((D3D12Texture*)material->baseColor);
 					objectData->material.normalID = sceneTexturePool.getIndex((D3D12Texture*)material->normal);
 					objectData->material.roughnessAOID = sceneTexturePool.getIndex((D3D12Texture*)material->roughnessAO);
-					objectData->material.metallicID = sceneTexturePool.getIndex((D3D12Texture*)material->metallic);
+					if(material->metallic) objectData->material.metallicID = sceneTexturePool.getIndex((D3D12Texture*)material->metallic);
 					objectData->material.heightID = sceneTexturePool.getIndex((D3D12Texture*)material->height);
 					if(material->special) objectData->material.specialID = sceneTexturePool.getIndex((D3D12Texture*)material->special);
 
@@ -3621,7 +3769,7 @@ namespace RIN {
 					objectData->material.baseColorID = sceneTexturePool.getIndex((D3D12Texture*)material->baseColor);
 					objectData->material.normalID = sceneTexturePool.getIndex((D3D12Texture*)material->normal);
 					objectData->material.roughnessAOID = sceneTexturePool.getIndex((D3D12Texture*)material->roughnessAO);
-					objectData->material.metallicID = sceneTexturePool.getIndex((D3D12Texture*)material->metallic);
+					if(material->metallic) objectData->material.metallicID = sceneTexturePool.getIndex((D3D12Texture*)material->metallic);
 					objectData->material.heightID = sceneTexturePool.getIndex((D3D12Texture*)material->height);
 					if(material->special) objectData->material.specialID = sceneTexturePool.getIndex((D3D12Texture*)material->special);
 
@@ -3721,7 +3869,7 @@ namespace RIN {
 		ID3D12Resource* resource;
 		HRESULT result = device->CreatePlacedResource(
 			sceneTextureHeap,
-			textureAlloc->start,
+			sceneTextureOffset + textureAlloc->start,
 			&resourceDesc,
 			D3D12_RESOURCE_STATE_COMMON,
 			nullptr,
@@ -3872,13 +4020,13 @@ namespace RIN {
 		sceneLightPool.remove(light);
 	}
 
-	void D3D12Renderer::setSkybox(Texture* skybox, Texture* diffuseIBL, Texture* specularIBL) {
-		if(!skybox || !diffuseIBL || !specularIBL) return;
+	void D3D12Renderer::setSkybox(Texture* skybox, Texture* iblDiffuse, Texture* iblSpecular) {
+		if(!skybox || !iblDiffuse || !iblSpecular) return;
 
 		// Validation
 		if(skybox->type != TEXTURE_TYPE::TEXTURE_CUBE) RIN_ERROR("Skybox texture must be type texture cube");
-		if(diffuseIBL->type != TEXTURE_TYPE::TEXTURE_CUBE) RIN_ERROR("Diffuse IBL texture must be type texture cube");
-		if(specularIBL->type != TEXTURE_TYPE::TEXTURE_CUBE) RIN_ERROR("Specular IBL texture must be type texture cube");
+		if(iblDiffuse->type != TEXTURE_TYPE::TEXTURE_CUBE) RIN_ERROR("Diffuse IBL texture must be type texture cube");
+		if(iblSpecular->type != TEXTURE_TYPE::TEXTURE_CUBE) RIN_ERROR("Specular IBL texture must be type texture cube");
 
 		switch(skybox->format) {
 		case TEXTURE_FORMAT::R16B16G16A16_FLOAT:
@@ -3889,48 +4037,77 @@ namespace RIN {
 			RIN_ERROR("Invalid skybox texture format");
 		}
 
-		switch(diffuseIBL->format) {
+		switch(iblDiffuse->format) {
 		case TEXTURE_FORMAT::R16B16G16A16_FLOAT:
 		case TEXTURE_FORMAT::R32G32B32A32_FLOAT:
 		case TEXTURE_FORMAT::BC6H_FLOAT:
 			break;
 		default:
-			RIN_ERROR("Invalid diffuse IBL texture format");
+			RIN_ERROR("Invalid IBL diffuse texture format");
 		}
 
-		switch(specularIBL->format) {
+		switch(iblSpecular->format) {
 		case TEXTURE_FORMAT::R16B16G16A16_FLOAT:
 		case TEXTURE_FORMAT::R32G32B32A32_FLOAT:
 		case TEXTURE_FORMAT::BC6H_FLOAT:
 			break;
 		default:
-			RIN_ERROR("Invalid specular IBL texture format");
+			RIN_ERROR("Invalid IBL specular texture format");
 		}
 
-		skyboxTexture = (D3D12Texture*)skybox;
-		diffuseIBLTexture = (D3D12Texture*)diffuseIBL;
-		specularIBLTexture = (D3D12Texture*)specularIBL;
+		// Create scene skybox texture SRV
+		D3D12Texture* skyboxTexture = (D3D12Texture*)skybox;
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = getFormat(skyboxTexture->format);
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.TextureCube.MostDetailedMip = 0;
+		srvDesc.TextureCube.MipLevels = 1;
+		srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+
+		device->CreateShaderResourceView(skyboxTexture->resource, &srvDesc, getSceneDescHeapCPUHandle(SCENE_SKYBOX_TEXTURE_SRV_OFFSET));
+
+		// Create scene IBL diffuse texture SRV
+		D3D12Texture* iblDiffuseTexture = (D3D12Texture*)iblDiffuse;
+
+		srvDesc.Format = getFormat(iblDiffuseTexture->format);
+
+		device->CreateShaderResourceView(iblDiffuseTexture->resource, &srvDesc, getSceneDescHeapCPUHandle(SCENE_IBL_DIFFUSE_TEXTURE_SRV_OFFSET));
+
+		// Create scene IBL specular texture SRV
+		ID3D12Resource* iblSpecularResource = ((D3D12Texture*)iblSpecular)->resource;
+		D3D12_RESOURCE_DESC iblSpecularResourceDesc = iblSpecularResource->GetDesc();
+
+		srvDesc.Format = iblSpecularResourceDesc.Format;
+		srvDesc.TextureCube.MipLevels = iblSpecularResourceDesc.MipLevels;
+
+		device->CreateShaderResourceView(iblSpecularResource, &srvDesc, getSceneDescHeapCPUHandle(SCENE_IBL_SPECULAR_TEXTURE_SRV_OFFSET));
+
+		sceneIBLSpecularMIPCount = iblSpecularResourceDesc.MipLevels;
 
 		skyboxDirty = true;
 	}
 
-	void D3D12Renderer::setBRDFLUT(Texture* texture) {
-		if(!texture) return;
+	void D3D12Renderer::clearSkybox() {
+		// Create scene skybox texture SRV
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+		srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.TextureCube.MostDetailedMip = 0;
+		srvDesc.TextureCube.MipLevels = 1;
+		srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
 
-		// Validation
-		if(texture->type != TEXTURE_TYPE::TEXTURE_2D) RIN_ERROR("BRDF LUT must be type texture 2D");
+		device->CreateShaderResourceView(sceneZeroCubeTexture, &srvDesc, getSceneDescHeapCPUHandle(SCENE_SKYBOX_TEXTURE_SRV_OFFSET));
 
-		switch(texture->format) {
-		case TEXTURE_FORMAT::R8G8_UNORM:
-		case TEXTURE_FORMAT::R16G16_FLOAT:
-		case TEXTURE_FORMAT::R32G32_FLOAT:
-		case TEXTURE_FORMAT::BC5_UNORM:
-			break;
-		default:
-			RIN_ERROR("Invalid BRDF LUT format");
-		}
+		// Create scene IBL diffuse texture SRV
+		device->CreateShaderResourceView(sceneZeroCubeTexture, &srvDesc, getSceneDescHeapCPUHandle(SCENE_IBL_DIFFUSE_TEXTURE_SRV_OFFSET));
 
-		brdfLUT = (D3D12Texture*)texture;
+		// Create scene IBL specular texture SRV
+		device->CreateShaderResourceView(sceneZeroCubeTexture, &srvDesc, getSceneDescHeapCPUHandle(SCENE_IBL_SPECULAR_TEXTURE_SRV_OFFSET));
+
+		sceneIBLSpecularMIPCount = 1;
 
 		skyboxDirty = true;
 	}
@@ -3968,7 +4145,7 @@ namespace RIN {
 				objectData->material.baseColorID = sceneTexturePool.getIndex((D3D12Texture*)material->baseColor);
 				objectData->material.normalID = sceneTexturePool.getIndex((D3D12Texture*)material->normal);
 				objectData->material.roughnessAOID = sceneTexturePool.getIndex((D3D12Texture*)material->roughnessAO);
-				objectData->material.metallicID = sceneTexturePool.getIndex((D3D12Texture*)material->metallic);
+				if(material->metallic) objectData->material.metallicID = sceneTexturePool.getIndex((D3D12Texture*)material->metallic);
 				objectData->material.heightID = sceneTexturePool.getIndex((D3D12Texture*)material->height);
 				if(material->special) objectData->material.specialID = sceneTexturePool.getIndex((D3D12Texture*)material->special);
 
