@@ -537,14 +537,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 			if(boneNodes[0][53]) boneNodes[0][53]->setBoneSpaceTansform(DirectX::XMMatrixRotationZ(sinSNorm * DirectX::XM_PIDIV4 * 0.25f));
 			if(boneNodes[0][54]) boneNodes[0][54]->setBoneSpaceTansform(DirectX::XMMatrixRotationZ(sinSNorm * DirectX::XM_PIDIV4 * 0.125f));
 			// Left leg
-			if(boneNodes[0][62]) boneNodes[0][62]->setBoneSpaceTansform(DirectX::XMMatrixRotationX(cosUNorm * DirectX::XM_PIDIV4 * 0.5f));
-			if(boneNodes[0][63]) boneNodes[0][63]->setBoneSpaceTansform(DirectX::XMMatrixRotationX(cosUNorm * -DirectX::XM_PIDIV4 * 1.5f));
-			if(boneNodes[0][64]) boneNodes[0][64]->setBoneSpaceTansform(DirectX::XMMatrixRotationX(cosUNorm * -DirectX::XM_PIDIV4 * 0.25f));
+			if(boneNodes[0][62]) boneNodes[0][62]->setBoneSpaceTansform(DirectX::XMMatrixRotationX((1.0f - cosUNorm) * DirectX::XM_PIDIV4 * 0.5f));
+			if(boneNodes[0][63]) boneNodes[0][63]->setBoneSpaceTansform(DirectX::XMMatrixRotationX((1.0f - cosUNorm) * -DirectX::XM_PIDIV4 * 1.5f));
+			if(boneNodes[0][64]) boneNodes[0][64]->setBoneSpaceTansform(DirectX::XMMatrixRotationX((1.0f - cosUNorm) * -DirectX::XM_PIDIV4 * 0.25f));
 			if(boneNodes[0][65]) boneNodes[0][65]->setBoneSpaceTansform(DirectX::XMMatrixRotationZ(sinUNormOffset * -DirectX::XM_PIDIV4 * 0.55f));
 			// Right leg
-			if(boneNodes[0][57]) boneNodes[0][57]->setBoneSpaceTansform(DirectX::XMMatrixRotationX((1.0f - cosUNorm) * DirectX::XM_PIDIV4 * 0.5f));
-			if(boneNodes[0][58]) boneNodes[0][58]->setBoneSpaceTansform(DirectX::XMMatrixRotationX((1.0f - cosUNorm) * -DirectX::XM_PIDIV4 * 1.5f));
-			if(boneNodes[0][59]) boneNodes[0][59]->setBoneSpaceTansform(DirectX::XMMatrixRotationX((1.0f - cosUNorm) * -DirectX::XM_PIDIV4 * 0.25f));
+			if(boneNodes[0][57]) boneNodes[0][57]->setBoneSpaceTansform(DirectX::XMMatrixRotationX(cosUNorm * DirectX::XM_PIDIV4 * 0.5f));
+			if(boneNodes[0][58]) boneNodes[0][58]->setBoneSpaceTansform(DirectX::XMMatrixRotationX(cosUNorm * -DirectX::XM_PIDIV4 * 1.5f));
+			if(boneNodes[0][59]) boneNodes[0][59]->setBoneSpaceTansform(DirectX::XMMatrixRotationX(cosUNorm * -DirectX::XM_PIDIV4 * 0.25f));
 			if(boneNodes[0][60]) boneNodes[0][60]->setBoneSpaceTansform(DirectX::XMMatrixRotationZ(sinUNormOffset * DirectX::XM_PIDIV4 * 0.55f));
 		}
 
