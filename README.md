@@ -38,6 +38,7 @@ Point Lights:
 * Skinned meshes
 * Dynamic scene editing
 * Deferred resource uploading
+* Dynamic mesh LOD selection
 * Multithreaded
 
 ## Materials
@@ -220,6 +221,7 @@ There is an endless number of features that could be added to RIN, however these
 
 * Eliminate occlusion culling frame latency. Arseny Kapoulkine explains a nice way of doing this during one of his [Niagra streams](https://youtu.be/YCteLdYdZWQ).
 * Allow a dynamic number of lights per cluster to help with high light density areas.
+* Allow LOD selection distances to be configured.
 * Multisample anti-aliasing (MSAA).
 * Sun shadows with cascaded shadow maps.
 * Screen space reflections (SSR).
