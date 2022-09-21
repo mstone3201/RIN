@@ -132,7 +132,7 @@ float3 evaluateStandard(PBRInput input) {
 
 		// Diffuse contribution - Lambertian
 		float3 Rd = diffColor * INV_PI;
-		float3 d = (1.0f - Fx);
+		float3 d = 1.0f - Fx;
 
 		// Total reflectance - Cook-Torrance
 		// R = s * Rs + d * Rd
@@ -233,7 +233,7 @@ float3 evaluateClearCoat(PBRInput input) {
 
 		// Diffuse contribution - Lambertian
 		float3 Rd = diffColor * INV_PI;
-		float3 d = (1.0f - Fx);
+		float3 d = 1.0f - Fx;
 
 		// Total reflectance - Cook-Torrance
 		// R = s * Rs + d * Rd
